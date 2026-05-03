@@ -1,5 +1,5 @@
 project:
-  base_dir: "~/auto"
+  base_dir: "~/msc/auto"
 
 llvm:
   tag: "llvmorg-21.1.0"
