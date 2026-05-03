@@ -1,4 +1,4 @@
-from parse_results import parse_results_directory
+from parse_results import parse_results_directory, get_results_dir_from_config
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -130,7 +130,7 @@ def generate_pure_plotly_report(df: pd.DataFrame, output_file: Path | str) -> No
 
 
 if __name__ == "__main__":
-    RESULTS_DIR = Path("~/auto/results").expanduser()
+    RESULTS_DIR = get_results_dir_from_config()
     parsed_records = parse_results_directory(RESULTS_DIR)
     print(f"Successfully parsed {len(parsed_records)} benchmark records.")
 

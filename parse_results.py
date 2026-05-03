@@ -6,8 +6,12 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
+import yaml
 
 logging.basicConfig(level=logging.WARNING, format='[%(levelname)s] %(message)s')
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = SCRIPT_DIR / "config.yml"
 
 # ==========================================
 # 1. Unified Data Structure
@@ -191,8 +195,22 @@ def parse_results_directory(base_dir: Path | str) -> list[BenchmarkRecord]:
 
     return all_records
 
+def get_results_dir_from_config() -> Path:
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            config: dict[str, Any] = yaml.safe_load(f)
+    except OSError as e:
+        raise FileNotFoundError(f"Failed to read config file at {CONFIG_FILE}: {e}") from e
+
+    try:
+        base_dir = Path(config["project"]["base_dir"]).expanduser().resolve()
+    except (TypeError, KeyError) as e:
+        raise KeyError("Missing required config key: project.base_dir") from e
+
+    return base_dir / "results"
+
 if __name__ == "__main__":
-    RESULTS_DIR = Path("~/auto/results").expanduser()
+    RESULTS_DIR = get_results_dir_from_config()
     
     parsed_records = parse_results_directory(RESULTS_DIR)
     
