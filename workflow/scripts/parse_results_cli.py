@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from parse_results import filter_records, parse_results_directory, write_records_table
+from workflow.lib.parse_results import filter_records, parse_results_directory, write_records_table
 
 
 def parse_args() -> argparse.Namespace:

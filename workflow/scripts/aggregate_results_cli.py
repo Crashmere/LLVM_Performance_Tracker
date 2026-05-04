@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from generate_report import aggregate_benchmark_records, read_table, write_table
+from workflow.lib.reporting import aggregate_benchmark_records, read_table, write_table
 
 
 def parse_args() -> argparse.Namespace:

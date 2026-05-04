@@ -722,6 +722,93 @@ python3 -m py_compile \
 - 尚未执行真实全流程
   - 本阶段重点是规则闭环、路径契约和 DAG 验证
 
+## 阶段 8：完成收尾清理并切换唯一入口
+
+### 目标
+
+- 将 Snakemake 设为唯一工作流入口
+- 清理旧顺序式 Python workflow 代码
+- 将保留的共享依赖模块全部整理到 `workflow/` 目录中
+- 更新使用文档，使新用户只需要阅读 README 就能使用当前工作流
+
+### 实际修改
+
+- 删除旧顺序式 workflow 代码
+  - 删除根目录 `benchmark_pipeline.py`
+- 将共享模块迁移到 `workflow/lib/`
+  - 将原根目录 `parse_results.py` 迁移为 [`workflow/lib/parse_results.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/lib/parse_results.py)
+  - 将原根目录 `generate_report.py` 迁移为 [`workflow/lib/reporting.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/lib/reporting.py)
+  - 将原 `workflow/scripts/common.py` 迁移为 [`workflow/lib/common.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/lib/common.py)
+- 新增包初始化文件
+  - [`workflow/__init__.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/__init__.py)
+  - [`workflow/lib/__init__.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/lib/__init__.py)
+- 更新所有工作流导入路径
+  - `workflow.Snakefile`
+  - `workflow/scripts/checkout_repo.py`
+  - `workflow/scripts/build_llvm.py`
+  - `workflow/scripts/build_official.py`
+  - `workflow/scripts/build_raja.py`
+  - `workflow/scripts/parse_results_cli.py`
+  - `workflow/scripts/aggregate_results_cli.py`
+  - `workflow/scripts/generate_report_cli.py`
+- 更新 [`README.md`](/home/eidf018/eidf018/s2778911-aspp/msc/README.md)
+  - 改为以 Snakemake 为唯一入口
+  - 更新目录说明、环境准备、运行方式、输出布局
+  - 移除旧版 `benchmark_pipeline.py` / `parse_results.py` / `generate_report.py` 的使用说明
+- 更新 [`.gitignore`](/home/eidf018/eidf018/s2778911-aspp/msc/.gitignore)
+  - 增加 `.snakemake/`
+  - 增加 `workflow/scripts/__pycache__/`
+  - 增加 `workflow/lib/__pycache__/`
+
+### 清理说明
+
+- 当前仓库保留的工作流代码全部位于：
+  - `workflow/Snakefile`
+  - `workflow/lib/`
+  - `workflow/scripts/`
+- 根目录只保留：
+  - 配置文件
+  - 文档
+  - 工作流入口目录 `workflow/`
+
+### 验证
+
+- 运行语法检查：
+
+```bash
+python3 -m py_compile \
+  workflow/lib/common.py \
+  workflow/lib/parse_results.py \
+  workflow/lib/reporting.py \
+  workflow/scripts/parse_results_cli.py \
+  workflow/scripts/aggregate_results_cli.py \
+  workflow/scripts/generate_report_cli.py \
+  workflow/scripts/checkout_repo.py \
+  workflow/scripts/build_llvm.py \
+  workflow/scripts/build_official.py \
+  workflow/scripts/build_raja.py \
+  workflow/scripts/run_official.py \
+  workflow/scripts/run_raja.py
+```
+
+- 运行 Snakemake dry-run：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile -n -j 2 -p
+```
+
+- 验证结果
+  - 所有共享模块都可以从 `workflow/lib/` 正常导入
+  - 工作流 `dry-run` 仍能成功解析到最终报告目标
+  - README 已切换为 Snakemake-only 使用方式
+
+### 当前状态说明
+
+- 阶段 8 的目标已完成
+- 旧顺序式 Python workflow 已清理
+- 当前仓库只保留 Snakemake 工作流代码
+- 工作流共享依赖模块已全部整理到 `workflow/` 目录内
+
 ## 后续追加约定
 
 - 每完成一个迁移阶段，就在本文件追加一节

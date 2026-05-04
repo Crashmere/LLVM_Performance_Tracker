@@ -11,7 +11,7 @@ configfile: str(REPO_ROOT / "config.yml")
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.scripts.common import get_layout_paths, normalize_workflow_config, resolve_llvm_version
+from workflow.lib.common import get_layout_paths, normalize_workflow_config, resolve_llvm_version
 
 
 WORKFLOW_CONFIG = normalize_workflow_config(config)
