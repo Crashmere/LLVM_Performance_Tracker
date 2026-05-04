@@ -391,6 +391,120 @@ python3 -m py_compile \
   - `checkout_raja` / `build_raja`
   - benchmark 运行与解析报告规则
 
+## 阶段 5：接入 Official 和 RAJA 构建规则
+
+### 目标
+
+- 将 Official 和 RAJA 的 checkout/build 流程接入现有 Snakemake DAG
+- 让两个 suite 的 build 依赖 LLVM install，而不是依赖旧脚本中的全局状态
+- 为 `build_official` 和 `build_raja` 提供稳定的完成判定
+- 验证在 `snakemake -j 2` 下，Official 和 RAJA build 具备并行执行条件
+
+### 实际修改
+
+- 修改 [`workflow/Snakefile`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/Snakefile)
+  - 新增 `checkout_official`
+  - 新增 `checkout_raja`
+  - 新增 `build_official`
+  - 新增 `build_raja`
+  - 更新 `rule all`
+    - 默认目标现在包含：
+      - LLVM build 完成
+      - Official build 完成
+      - RAJA build 完成
+- 新增 [`workflow/scripts/build_official.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/build_official.py)
+  - 复用 `get_official_cmake_args()`
+  - 复用 `build_with_cmake()`
+  - 输出 `CMakeCache.txt` 与 `.build_complete`
+- 新增 [`workflow/scripts/build_raja.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/build_raja.py)
+  - 复用 `get_raja_cmake_args()`
+  - 复用 `build_with_cmake()`
+  - 输出 `bin/raja-perf.exe` 与 `.build_complete`
+- 修改 [`workflow/scripts/checkout_repo.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/checkout_repo.py)
+  - 增加 `recursive` 参数支持
+  - 使 `checkout_raja` 可以按 submodule 方式准备源码
+  - 将 `recursive` 状态写入 stamp 文件
+
+### 规则设计说明
+
+- `checkout_official`
+  - 输出：
+    - `directory(sources/official/<official_tag>)`
+    - `sources/official/<official_tag>/.checkout_complete`
+- `checkout_raja`
+  - 输出：
+    - `directory(sources/raja/<raja_tag>)`
+    - `sources/raja/<raja_tag>/.checkout_complete`
+  - 使用递归 submodule checkout
+- `build_official`
+  - 输入：
+    - Official checkout stamp
+    - LLVM `bin/clang++`
+    - LLVM `.build_complete`
+  - 输出：
+    - `builds/official/<official_tag>/llvm-<llvm_version>/CMakeCache.txt`
+    - `builds/official/<official_tag>/llvm-<llvm_version>/.build_complete`
+- `build_raja`
+  - 输入：
+    - RAJA checkout stamp
+    - LLVM `bin/clang++`
+    - LLVM `.build_complete`
+  - 输出：
+    - `builds/raja/<raja_tag>/llvm-<llvm_version>/bin/raja-perf.exe`
+    - `builds/raja/<raja_tag>/llvm-<llvm_version>/.build_complete`
+
+### 验证
+
+- 运行语法检查：
+
+```bash
+python3 -m py_compile \
+  workflow/scripts/checkout_repo.py \
+  workflow/scripts/build_llvm.py \
+  workflow/scripts/build_official.py \
+  workflow/scripts/build_raja.py \
+  workflow/scripts/common.py \
+  benchmark_pipeline.py
+```
+
+- 运行 Snakemake dry-run：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile -n -j 2 -p
+```
+
+- 运行 DAG 可视化文本输出：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile --dag
+```
+
+- 验证结果
+  - Snakemake 成功解析包含 7 个 job 的 DAG：
+    - `checkout_llvm`
+    - `checkout_official`
+    - `checkout_raja`
+    - `build_llvm`
+    - `build_official`
+    - `build_raja`
+    - `all`
+  - `build_official` 与 `build_raja` 都显式依赖 LLVM build 产物与各自的 checkout stamp
+  - DAG 中 `build_official` 与 `build_raja` 位于并行分支
+  - 在 `-j 2` dry-run 下，规则依赖关系已满足并行执行条件
+  - 每个新增 rule 都配置了独立日志文件：
+    - `checkout_official.log`
+    - `checkout_raja.log`
+    - `build_official.log`
+    - `build_raja.log`
+
+### 当前状态说明
+
+- 阶段 5 的目标已完成
+- Official 与 RAJA 的 checkout/build 已接入 Snakemake DAG
+- build 完成判定不再依赖“目录存在”这种弱信号
+- 尚未执行真实 suite 构建
+  - 本阶段重点是规则契约、依赖表达和并行结构验证
+
 ## 后续追加约定
 
 - 每完成一个迁移阶段，就在本文件追加一节

@@ -31,6 +31,8 @@ rule all:
     input:
         str(LAYOUT["llvm_install"] / "bin" / "clang++"),
         str(LAYOUT["llvm_build"] / ".build_complete"),
+        str(LAYOUT["official_build"] / ".build_complete"),
+        str(LAYOUT["raja_build"] / ".build_complete"),
 
 
 rule checkout_llvm:
@@ -42,6 +44,34 @@ rule checkout_llvm:
     params:
         repo_url=WORKFLOW_CONFIG["llvm"]["repo_url"],
         tag_or_branch=LLVM_TAG,
+    script:
+        "scripts/checkout_repo.py"
+
+
+rule checkout_official:
+    output:
+        source_dir=directory(str(LAYOUT["official_source"])),
+        stamp=str(LAYOUT["official_source"] / ".checkout_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "checkout_official.log"),
+    params:
+        repo_url=WORKFLOW_CONFIG["test_suite"]["official"]["repo_url"],
+        tag_or_branch=OFFICIAL_TAG,
+        recursive=False,
+    script:
+        "scripts/checkout_repo.py"
+
+
+rule checkout_raja:
+    output:
+        source_dir=directory(str(LAYOUT["raja_source"])),
+        stamp=str(LAYOUT["raja_source"] / ".checkout_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "checkout_raja.log"),
+    params:
+        repo_url=WORKFLOW_CONFIG["test_suite"]["raja"]["repo_url"],
+        tag_or_branch=RAJA_TAG,
+        recursive=True,
     script:
         "scripts/checkout_repo.py"
 
@@ -63,3 +93,43 @@ rule build_llvm:
         ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
     script:
         "scripts/build_llvm.py"
+
+
+rule build_official:
+    input:
+        checkout_stamp=str(LAYOUT["official_source"] / ".checkout_complete"),
+        llvm_clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
+        llvm_stamp=str(LAYOUT["llvm_build"] / ".build_complete"),
+    output:
+        cache=str(LAYOUT["official_build"] / "CMakeCache.txt"),
+        stamp=str(LAYOUT["official_build"] / ".build_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "build_official.log"),
+    params:
+        source_dir=str(LAYOUT["official_source"]),
+        build_dir=str(LAYOUT["official_build"]),
+        llvm_install_dir=str(LAYOUT["llvm_install"]),
+        cxx_standard=WORKFLOW_CONFIG["test_suite"]["official"]["cxx_standard"],
+        ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
+    script:
+        "scripts/build_official.py"
+
+
+rule build_raja:
+    input:
+        checkout_stamp=str(LAYOUT["raja_source"] / ".checkout_complete"),
+        llvm_clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
+        llvm_stamp=str(LAYOUT["llvm_build"] / ".build_complete"),
+    output:
+        exe=str(LAYOUT["raja_build"] / "bin" / "raja-perf.exe"),
+        stamp=str(LAYOUT["raja_build"] / ".build_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "build_raja.log"),
+    params:
+        source_dir=str(LAYOUT["raja_source"]),
+        build_dir=str(LAYOUT["raja_build"]),
+        llvm_install_dir=str(LAYOUT["llvm_install"]),
+        cxx_standard=WORKFLOW_CONFIG["test_suite"]["raja"]["cxx_standard"],
+        ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
+    script:
+        "scripts/build_raja.py"
