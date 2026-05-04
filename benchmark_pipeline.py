@@ -2,7 +2,6 @@
 
 import os
 import sys
-import shutil
 import subprocess
 import venv
 from datetime import datetime
@@ -32,8 +31,19 @@ if Path(sys.executable).resolve() != VENV_PYTHON.resolve():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] >>> Dependencies ready. Re-executing script within venv...")
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
-import yaml
 from typing import Any
+
+from workflow.scripts.common import (
+    build_with_cmake,
+    get_llvm_cmake_args,
+    get_official_cmake_args,
+    get_raja_cmake_args,
+    get_resolved_tag,
+    load_config,
+    normalize_ninja_jobs,
+    prepare_git_repo,
+    resolve_llvm_version,
+)
 
 # ==========================================
 # 1. Configuration & Globals
@@ -44,21 +54,16 @@ if not CONFIG_FILE.exists():
     print(f"Error: Configuration file not found at {CONFIG_FILE}")
     sys.exit(1)
 
-with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-    config: dict[str, Any] = yaml.safe_load(f)
+config: dict[str, Any] = load_config(CONFIG_FILE)
 
 BASE_DIR = Path(config["project"]["base_dir"]).expanduser().resolve()
 RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 LLVM_TAG = str(config["llvm"].get("tag", "latest"))
-
-if "-" in LLVM_TAG:
-    LLVM_VERSION = LLVM_TAG.split("-", 1)[1]
-else:
-    LLVM_VERSION = LLVM_TAG
+LLVM_VERSION = resolve_llvm_version(LLVM_TAG)
 
 LLVM_REPO_URL = config["llvm"]["repo_url"]
-NINJA_JOBS = config["llvm"]["build"].get("ninja_jobs", [])
+NINJA_JOBS = normalize_ninja_jobs(config["llvm"]["build"].get("ninja_jobs", []))
 HOST_C_COMPILER = config["llvm"]["build"].get("c_compiler", "gcc")
 HOST_CXX_COMPILER = config["llvm"]["build"].get("cxx_compiler", "g++")
 
@@ -121,96 +126,6 @@ def run_cmd(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None 
             print_step(f"[ERROR] Command failed with exit code {e.returncode}. Check {CURRENT_LOG_FILE.name} for details.")
             return False
 
-def clear_directory(dir_path: Path) -> None:
-    if not dir_path.exists():
-        return
-    for item in dir_path.iterdir():
-        if item.is_dir():
-            shutil.rmtree(item)
-        else:
-            item.unlink()
-
-def get_resolved_tag(repo_url: str, configured_tag: str) -> str:
-    if configured_tag.lower() != "latest":
-        return configured_tag
-    
-    print_step(f"Resolving 'latest' commit hash for {repo_url}...")
-    try:
-        output = subprocess.check_output(["git", "ls-remote", repo_url, "HEAD"], text=True)
-        if output:
-            short_hash = output.split()[0][:7]
-            print_step(f"Resolved to short hash: {short_hash}")
-            return short_hash
-    except Exception as e:
-        print_step(f"[WARNING] Failed to resolve remote hash. Using fallback 'latest'. Error: {e}")
-    
-    return "latest"
-
-def prepare_git_repo(repo_url: str, target_dir: Path, tag_or_branch: str | None = None, 
-                     recursive: bool = False) -> bool:
-    if not (target_dir / ".git").exists():
-        print_step(f"Cloning {repo_url} into {target_dir}...")
-        cmd = ["git", "clone"]
-        if recursive:
-            cmd.append("--recursive")
-        cmd.extend([repo_url, str(target_dir)])
-        if not run_cmd(cmd, cwd=target_dir.parent):
-            return False
-    
-    if tag_or_branch:
-        if tag_or_branch.lower() == "latest":
-            if not run_cmd(["git", "fetch", "origin"], cwd=target_dir): return False
-            if not run_cmd(["git", "remote", "set-head", "origin", "-a"], cwd=target_dir): return False
-            if not run_cmd(["git", "reset", "--hard", "origin/HEAD"], cwd=target_dir): return False
-        else:
-            if not run_cmd(["git", "fetch", "--tags"], cwd=target_dir): return False
-            if not run_cmd(["git", "checkout", tag_or_branch], cwd=target_dir): return False
-        
-        if recursive:
-            if not run_cmd(["git", "submodule", "update", "--init", "--recursive"], cwd=target_dir): return False
-            
-    try:
-        current_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=target_dir, text=True).strip()
-        print_step(f"Repository {target_dir.name} successfully set to commit hash: {current_hash}")
-    except subprocess.CalledProcessError:
-        print_step(f"[WARNING] Failed to retrieve current commit hash for {target_dir.name}")
-
-    return True
-
-def build_with_cmake(build_dir: Path, cmake_args: list[str], install: bool = False) -> bool:
-    clear_directory(build_dir)
-    build_dir.mkdir(parents=True, exist_ok=True)
-    
-    print_step("Configuring with CMake...")
-    if not run_cmd(["cmake", "-G", "Ninja"] + cmake_args, cwd=build_dir): return False
-    
-    print_step("Compiling...")
-    if not run_cmd(["ninja"] + NINJA_JOBS, cwd=build_dir): return False
-    
-    if install:
-        print_step("Installing...")
-        if not run_cmd(["ninja", "install"], cwd=build_dir): return False
-        
-    return True
-
-def get_actual_clang_major_version() -> str:
-    try:
-        output = subprocess.check_output([str(CLANGXX_PATH), "-dumpversion"], text=True)
-        return output.strip().split(".")[0]
-    except subprocess.CalledProcessError:
-        print_step("[ERROR] Failed to probe Clang version.")
-        sys.exit(1)
-
-def find_omp_library() -> Path | None:
-    lib_base_dir = LLVM_CUSTOM_DIR / "lib"
-    if not lib_base_dir.exists():
-        return None
-    
-    for path in lib_base_dir.rglob("libomp.so"):
-        return path
-        
-    return None
-
 # ==========================================
 # 3. Core Phase Functions
 # ==========================================
@@ -218,8 +133,8 @@ def setup_directories() -> tuple[Path, Path]:
     set_current_log("01_init_directories")
     print_step("Phase 1: Initializing directory structure...")
     
-    resolved_official_tag = get_resolved_tag(OFFICIAL_REPO_URL, OFFICIAL_TAG)
-    resolved_raja_tag = get_resolved_tag(RAJA_REPO_URL, RAJA_TAG)
+    resolved_official_tag = get_resolved_tag(OFFICIAL_REPO_URL, OFFICIAL_TAG, print_step)
+    resolved_raja_tag = get_resolved_tag(RAJA_REPO_URL, RAJA_TAG, print_step)
     
     RESULTS_BASE_DIR = BASE_DIR / "results"
     
@@ -253,23 +168,11 @@ def build_llvm() -> bool:
     llvm_project_dir = BASE_DIR / "compiler/llvm-project"
     llvm_build_dir = llvm_project_dir / "build"
 
-    if not prepare_git_repo(LLVM_REPO_URL, llvm_project_dir, tag_or_branch=LLVM_TAG):
+    if not prepare_git_repo(LLVM_REPO_URL, llvm_project_dir, LLVM_TAG, run_cmd, print_step):
         return False
 
-    cmake_args = [
-        "../llvm",
-        f"-DCMAKE_C_COMPILER={HOST_C_COMPILER}",
-        f"-DCMAKE_CXX_COMPILER={HOST_CXX_COMPILER}",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DLLVM_ENABLE_PROJECTS=clang;lld",
-        "-DLLVM_ENABLE_RUNTIMES=openmp",
-        "-DLLVM_TARGETS_TO_BUILD=X86",
-        "-DLLVM_INCLUDE_TESTS=OFF",
-        "-DLLVM_INCLUDE_BENCHMARKS=OFF",
-        "-DLLVM_ENABLE_WARNINGS=OFF",
-        f"-DCMAKE_INSTALL_PREFIX={LLVM_CUSTOM_DIR}"
-    ]
-    if build_with_cmake(llvm_build_dir, cmake_args, install=True):
+    cmake_args = get_llvm_cmake_args(HOST_C_COMPILER, HOST_CXX_COMPILER, LLVM_CUSTOM_DIR)
+    if build_with_cmake(llvm_build_dir, cmake_args, NINJA_JOBS, run_cmd, print_step, install=True):
         print_step("LLVM built and installed successfully.")
         return True
     return False
@@ -280,18 +183,11 @@ def build_official_suite() -> bool:
     official_src_dir = BASE_DIR / "official/source"
     official_build_dir = BASE_DIR / "official/build"
 
-    if not prepare_git_repo(OFFICIAL_REPO_URL, official_src_dir, tag_or_branch=OFFICIAL_TAG):
+    if not prepare_git_repo(OFFICIAL_REPO_URL, official_src_dir, OFFICIAL_TAG, run_cmd, print_step):
         return False
 
-    cmake_args = [
-        f"-DCMAKE_C_COMPILER={CLANG_PATH}",
-        f"-DCMAKE_CXX_COMPILER={CLANGXX_PATH}",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DTEST_SUITE_BENCHMARKING_ONLY=ON",
-        f"-DCMAKE_CXX_STANDARD={OFFICIAL_CXX_STD}",
-        "../source"
-    ]
-    if build_with_cmake(official_build_dir, cmake_args):
+    cmake_args = get_official_cmake_args(CLANG_PATH, CLANGXX_PATH, OFFICIAL_CXX_STD)
+    if build_with_cmake(official_build_dir, cmake_args, NINJA_JOBS, run_cmd, print_step):
         print_step("Official Test Suite built successfully.")
         return True
     return False
@@ -302,41 +198,16 @@ def build_raja_suite() -> bool:
     raja_src_dir = BASE_DIR / "raja/source"
     raja_build_dir = BASE_DIR / "raja/build"
 
-    if not prepare_git_repo(RAJA_REPO_URL, raja_src_dir, tag_or_branch=RAJA_TAG, recursive=True):
+    if not prepare_git_repo(RAJA_REPO_URL, raja_src_dir, RAJA_TAG, run_cmd, print_step, recursive=True):
         return False
 
-    # Dynamic OpenMP library discovery
-    omp_lib_path = find_omp_library()
-    if not omp_lib_path:
-        print_step(f"[ERROR] Could not locate libomp.so within {LLVM_CUSTOM_DIR}/lib. OpenMP runtime might not be installed correctly.")
+    try:
+        cmake_args = get_raja_cmake_args(CLANG_PATH, CLANGXX_PATH, LLVM_CUSTOM_DIR, RAJA_CXX_STD)
+    except (FileNotFoundError, RuntimeError) as e:
+        print_step(f"[ERROR] {e}")
         return False
-        
-    omp_lib_dir = omp_lib_path.parent
-    print_step(f"Dynamically resolved OpenMP library path: {omp_lib_path}")
 
-    actual_major_version = get_actual_clang_major_version()
-    clang_include_dir = LLVM_CUSTOM_DIR / f"lib/clang/{actual_major_version}/include"
-
-    cmake_args = [
-        f"-DCMAKE_CXX_COMPILER={CLANGXX_PATH}",
-        f"-DCMAKE_C_COMPILER={CLANG_PATH}",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DENABLE_OPENMP=On",
-        "-DENABLE_CUDA=Off",
-        "-DENABLE_HIP=Off",
-        "-DENABLE_ALL_MISSING=On",
-        f"-DCMAKE_CXX_STANDARD={RAJA_CXX_STD}",
-        f"-DCMAKE_CXX_FLAGS=-I{clang_include_dir} -Wno-unused-command-line-argument",
-        f"-DCMAKE_C_FLAGS=-I{clang_include_dir} -Wno-unused-command-line-argument",
-        f"-DCMAKE_EXE_LINKER_FLAGS=-L{omp_lib_dir} -lomp -Wl,-rpath,{omp_lib_dir}",
-        "-DOpenMP_CXX_FLAGS=-fopenmp=libomp",
-        "-DOpenMP_C_FLAGS=-fopenmp=libomp",
-        "-DOpenMP_CXX_LIB_NAMES=omp",
-        "-DOpenMP_C_LIB_NAMES=omp",
-        f"-DOpenMP_omp_LIBRARY={omp_lib_path}",
-        "../source"
-    ]
-    if build_with_cmake(raja_build_dir, cmake_args):
+    if build_with_cmake(raja_build_dir, cmake_args, NINJA_JOBS, run_cmd, print_step):
         print_step("RAJA Performance Suite built successfully.")
         return True
     return False
