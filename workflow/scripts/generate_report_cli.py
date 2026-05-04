@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from generate_report import (
-    aggregate_benchmark_records,
+    ensure_aggregated_records,
     generate_pure_plotly_report,
     read_table,
     write_table,
@@ -32,8 +32,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    raw_df = read_table(args.input_file)
-    aggregated_df = aggregate_benchmark_records(raw_df)
+    input_df = read_table(args.input_file)
+    aggregated_df = ensure_aggregated_records(input_df)
 
     if args.aggregated_output:
         aggregated_path = write_table(aggregated_df, args.aggregated_output)

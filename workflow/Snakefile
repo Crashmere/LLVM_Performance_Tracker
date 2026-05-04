@@ -29,10 +29,7 @@ LAYOUT = get_layout_paths(BASE_DIR, LLVM_TAG, OFFICIAL_TAG, RAJA_TAG, LLVM_VERSI
 
 rule all:
     input:
-        str(LAYOUT["official_result"] / "baseline_results.json"),
-        str(LAYOUT["official_result"] / ".run_complete"),
-        str(LAYOUT["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
-        str(LAYOUT["raja_result"] / ".run_complete"),
+        str(LAYOUT["reports_run_dir"] / "benchmark_report.html"),
 
 
 rule checkout_llvm:
@@ -164,3 +161,42 @@ rule run_raja:
         result_dir=str(LAYOUT["raja_result"]),
     script:
         "scripts/run_raja.py"
+
+
+rule parse_results:
+    input:
+        official_results=str(LAYOUT["official_result"] / "baseline_results.json"),
+        official_stamp=str(LAYOUT["official_result"] / ".run_complete"),
+        raja_results=str(LAYOUT["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
+        raja_stamp=str(LAYOUT["raja_result"] / ".run_complete"),
+    output:
+        parsed_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records.csv"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "parse_results.log"),
+    params:
+        input_dir=str(LAYOUT["results_root"]),
+        run_label=RUN_LABEL,
+    shell:
+        ".venv/bin/python workflow/scripts/parse_results_cli.py --input-dir {params.input_dir} --run-label {params.run_label} --output-file {output.parsed_csv} > {log} 2>&1"
+
+
+rule aggregate_results:
+    input:
+        parsed_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records.csv"),
+    output:
+        aggregated_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records_aggregated.csv"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "aggregate_results.log"),
+    shell:
+        ".venv/bin/python workflow/scripts/aggregate_results_cli.py --input-file {input.parsed_csv} --output-file {output.aggregated_csv} > {log} 2>&1"
+
+
+rule generate_report:
+    input:
+        aggregated_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records_aggregated.csv"),
+    output:
+        html=str(LAYOUT["reports_run_dir"] / "benchmark_report.html"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "generate_report.log"),
+    shell:
+        ".venv/bin/python workflow/scripts/generate_report_cli.py --input-file {input.aggregated_csv} --output-html {output.html} > {log} 2>&1"

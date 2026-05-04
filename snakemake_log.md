@@ -609,6 +609,119 @@ python3 -m py_compile \
 - 尚未执行真实 benchmark
   - 本阶段重点是规则契约、输出布局与依赖结构验证
 
+## 阶段 7：接入结果解析和报告生成
+
+### 目标
+
+- 将 parse / aggregate / report 纳入 Snakemake 工作流闭环
+- 让 `rule all` 默认指向最终 HTML 报告
+- 让结果处理阶段不再依赖人工中间操作
+
+### 实际修改
+
+- 修改 [`workflow/Snakefile`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/Snakefile)
+  - 新增 `parse_results`
+  - 新增 `aggregate_results`
+  - 新增 `generate_report`
+  - 更新 `rule all`
+    - 默认目标现在指向：
+      - `reports/<run_label>/benchmark_report.html`
+- 新增 [`workflow/scripts/aggregate_results_cli.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/aggregate_results_cli.py)
+  - 从标准化 benchmark 表生成聚合结果表
+- 修改 [`workflow/scripts/generate_report_cli.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/generate_report_cli.py)
+  - 改为通过 `ensure_aggregated_records()` 处理输入
+  - 既可以接受原始 benchmark 表，也可以直接接受聚合结果表
+
+### 规则设计说明
+
+- `parse_results`
+  - 输入：
+    - Official `baseline_results.json`
+    - Official `.run_complete`
+    - RAJA `RAJAPerf-kernel-run-data.csv`
+    - RAJA `.run_complete`
+  - 输出：
+    - `parsed/<run_label>/benchmark_records.csv`
+  - 调用：
+    - `workflow/scripts/parse_results_cli.py`
+  - 通过 `--run-label <run_label>` 过滤，只抽取当前这次运行的数据
+- `aggregate_results`
+  - 输入：
+    - `parsed/<run_label>/benchmark_records.csv`
+  - 输出：
+    - `parsed/<run_label>/benchmark_records_aggregated.csv`
+  - 调用：
+    - `workflow/scripts/aggregate_results_cli.py`
+- `generate_report`
+  - 输入：
+    - `parsed/<run_label>/benchmark_records_aggregated.csv`
+  - 输出：
+    - `reports/<run_label>/benchmark_report.html`
+  - 调用：
+    - `workflow/scripts/generate_report_cli.py`
+
+### 验证
+
+- 运行语法检查：
+
+```bash
+python3 -m py_compile \
+  parse_results.py \
+  generate_report.py \
+  workflow/scripts/parse_results_cli.py \
+  workflow/scripts/aggregate_results_cli.py \
+  workflow/scripts/generate_report_cli.py \
+  workflow/scripts/run_official.py \
+  workflow/scripts/run_raja.py \
+  workflow/scripts/build_official.py \
+  workflow/scripts/build_raja.py \
+  workflow/scripts/build_llvm.py \
+  workflow/scripts/checkout_repo.py \
+  workflow/scripts/common.py \
+  benchmark_pipeline.py
+```
+
+- 运行 Snakemake dry-run：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile -n -j 2 -p
+```
+
+- 运行 DAG 可视化文本输出：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile --dag
+```
+
+- 验证结果
+  - Snakemake 成功解析包含 12 个 job 的完整 DAG：
+    - `checkout_llvm`
+    - `checkout_official`
+    - `checkout_raja`
+    - `build_llvm`
+    - `build_official`
+    - `build_raja`
+    - `run_official`
+    - `run_raja`
+    - `parse_results`
+    - `aggregate_results`
+    - `generate_report`
+    - `all`
+  - 依赖链已闭环：
+    - `run_official/run_raja -> parse_results -> aggregate_results -> generate_report -> all`
+  - `rule all` 已推进到最终报告层
+  - 结果处理阶段均已配置独立日志文件：
+    - `parse_results.log`
+    - `aggregate_results.log`
+    - `generate_report.log`
+
+### 当前状态说明
+
+- 阶段 7 的目标已完成
+- 当前工作流已经能够从 checkout/build/run 一路推进到标准化数据、聚合结果和最终 HTML 报告
+- 尚未执行真实全流程
+  - 本阶段重点是规则闭环、路径契约和 DAG 验证
+
 ## 后续追加约定
 
 - 每完成一个迁移阶段，就在本文件追加一节
