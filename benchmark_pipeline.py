@@ -177,7 +177,7 @@ def build_llvm() -> bool:
     if not prepare_git_repo(LLVM_REPO_URL, llvm_project_dir, LLVM_TAG, run_cmd, print_step):
         return False
 
-    cmake_args = get_llvm_cmake_args(HOST_C_COMPILER, HOST_CXX_COMPILER, LLVM_CUSTOM_DIR)
+    cmake_args = get_llvm_cmake_args(llvm_project_dir, HOST_C_COMPILER, HOST_CXX_COMPILER, LLVM_CUSTOM_DIR)
     if build_with_cmake(llvm_build_dir, cmake_args, NINJA_JOBS, run_cmd, print_step, install=True):
         print_step("LLVM built and installed successfully.")
         return True
@@ -192,7 +192,7 @@ def build_official_suite() -> bool:
     if not prepare_git_repo(OFFICIAL_REPO_URL, official_src_dir, OFFICIAL_TAG, run_cmd, print_step):
         return False
 
-    cmake_args = get_official_cmake_args(CLANG_PATH, CLANGXX_PATH, OFFICIAL_CXX_STD)
+    cmake_args = get_official_cmake_args(official_src_dir, CLANG_PATH, CLANGXX_PATH, OFFICIAL_CXX_STD)
     if build_with_cmake(official_build_dir, cmake_args, NINJA_JOBS, run_cmd, print_step):
         print_step("Official Test Suite built successfully.")
         return True
@@ -208,7 +208,7 @@ def build_raja_suite() -> bool:
         return False
 
     try:
-        cmake_args = get_raja_cmake_args(CLANG_PATH, CLANGXX_PATH, LLVM_CUSTOM_DIR, RAJA_CXX_STD)
+        cmake_args = get_raja_cmake_args(raja_src_dir, CLANG_PATH, CLANGXX_PATH, LLVM_CUSTOM_DIR, RAJA_CXX_STD)
     except (FileNotFoundError, RuntimeError) as e:
         print_step(f"[ERROR] {e}")
         return False

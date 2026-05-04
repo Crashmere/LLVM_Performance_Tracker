@@ -277,6 +277,120 @@ PY
   - 这符合“设计上支持矩阵，实施上先跑通单版本”的阶段目标
   - 旧 `parse_results.py` 不依赖配置文件，因此无需为目录布局调整额外改动
 
+## 阶段 4：搭建最小可运行 Snakemake 工作流
+
+### 目标
+
+- 建立最小但真实可运行的 `workflow/Snakefile`
+- 先跑通 LLVM 的 checkout + build 两条规则
+- 为 `build_llvm` 提供强完成信号，而不是只依赖目录存在
+- 验证 Snakemake 能正确解析最小 DAG，并支持重复执行时跳过已完成产物
+
+### 实际修改
+
+- 新增 [`workflow/Snakefile`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/Snakefile)
+  - 使用根目录 [`config.yml`](/home/eidf018/eidf018/s2778911-aspp/msc/config.yml) 作为工作流配置输入
+  - 在解析阶段通过 `normalize_workflow_config()` 归一化配置
+  - 使用 `get_layout_paths()` 计算 LLVM source/build/install/log 路径
+  - 定义最小规则集：
+    - `rule checkout_llvm`
+    - `rule build_llvm`
+    - `rule all`
+- 新增 [`workflow/scripts/checkout_repo.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/checkout_repo.py)
+  - 作为 `checkout_llvm` 的执行脚本
+  - 复用 `prepare_git_repo()`
+  - 生成 checkout 完成标记：
+    - `.checkout_complete`
+  - 为该 rule 写独立日志文件
+- 新增 [`workflow/scripts/build_llvm.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/build_llvm.py)
+  - 作为 `build_llvm` 的执行脚本
+  - 复用 `build_with_cmake()` 与 `get_llvm_cmake_args()`
+  - 生成 build 完成标记：
+    - `.build_complete`
+  - 显式检查关键产物：
+    - `installs/llvm/<llvm_tag>/bin/clang++`
+  - 为该 rule 写独立日志文件
+- 修改 [`workflow/scripts/common.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/common.py)
+  - 修正 LLVM / Official / RAJA 的 CMake 源码路径参数
+  - 使 helper 能兼容“build 目录与 source 目录分离”的新布局
+- 修改 [`benchmark_pipeline.py`](/home/eidf018/eidf018/s2778911-aspp/msc/benchmark_pipeline.py)
+  - 更新对 `get_llvm_cmake_args()`、`get_official_cmake_args()`、`get_raja_cmake_args()` 的调用
+  - 修复阶段 3 新目录布局下旧 pipeline 的 CMake 源码路径问题
+
+### 规则设计说明
+
+- `checkout_llvm`
+  - 输出：
+    - `directory(sources/llvm-project/<llvm_tag>)`
+    - `sources/llvm-project/<llvm_tag>/.checkout_complete`
+- `build_llvm`
+  - 输入：
+    - `sources/llvm-project/<llvm_tag>/.checkout_complete`
+  - 输出：
+    - `installs/llvm/<llvm_tag>/bin/clang++`
+    - `builds/llvm/<llvm_tag>/.build_complete`
+- `all`
+  - 默认目标指向 LLVM 关键产物与 build stamp
+
+### 验证
+
+- 运行语法检查：
+
+```bash
+python3 -m py_compile \
+  benchmark_pipeline.py \
+  parse_results.py \
+  generate_report.py \
+  workflow/scripts/common.py \
+  workflow/scripts/parse_results_cli.py \
+  workflow/scripts/generate_report_cli.py \
+  workflow/scripts/checkout_repo.py \
+  workflow/scripts/build_llvm.py
+```
+
+- 为项目 `.venv` 安装 `snakemake`
+
+- 运行 Snakemake dry-run：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile -n -p
+```
+
+- 运行 DAG 可视化文本输出：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile --dag
+```
+
+- 验证结果
+  - Snakemake 成功解析最小工作流
+  - `dry-run` 显示正确的依赖链：
+    - `checkout_llvm -> build_llvm -> all`
+  - `build_llvm` 同时依赖：
+    - 关键产物 `bin/clang++`
+    - 完成标记 `.build_complete`
+  - 规则日志路径已独立配置：
+    - `logs/<run_label>/checkout_llvm.log`
+    - `logs/<run_label>/build_llvm.log`
+
+### 环境说明
+
+- 本阶段为项目 `.venv` 补装了：
+  - `snakemake`
+- 这是运行环境变更，不属于 git 文件修改
+
+### 当前状态说明
+
+- 阶段 4 的目标已完成
+- 当前已经具备最小可运行 Snakemake 工作流
+- 已验证 DAG 解析与依赖关系正确
+- 尚未执行真实 LLVM 构建
+  - 原因是完整构建成本较高，本阶段先验证工作流结构与规则契约
+- 后续阶段可以在此基础上继续接入：
+  - `checkout_official` / `build_official`
+  - `checkout_raja` / `build_raja`
+  - benchmark 运行与解析报告规则
+
 ## 后续追加约定
 
 - 每完成一个迁移阶段，就在本文件追加一节

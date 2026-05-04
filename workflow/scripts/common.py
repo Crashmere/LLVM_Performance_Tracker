@@ -285,12 +285,13 @@ def find_omp_library(llvm_install_dir: Path) -> Path | None:
 
 
 def get_llvm_cmake_args(
+    llvm_source_dir: Path,
     host_c_compiler: str,
     host_cxx_compiler: str,
     llvm_install_dir: Path,
 ) -> list[str]:
     return [
-        "../llvm",
+        str(llvm_source_dir / "llvm"),
         f"-DCMAKE_C_COMPILER={host_c_compiler}",
         f"-DCMAKE_CXX_COMPILER={host_cxx_compiler}",
         "-DCMAKE_BUILD_TYPE=Release",
@@ -305,6 +306,7 @@ def get_llvm_cmake_args(
 
 
 def get_official_cmake_args(
+    source_dir: Path,
     clang_path: Path,
     clangxx_path: Path,
     cxx_standard: str,
@@ -315,11 +317,12 @@ def get_official_cmake_args(
         "-DCMAKE_BUILD_TYPE=Release",
         "-DTEST_SUITE_BENCHMARKING_ONLY=ON",
         f"-DCMAKE_CXX_STANDARD={cxx_standard}",
-        "../source",
+        str(source_dir),
     ]
 
 
 def get_raja_cmake_args(
+    source_dir: Path,
     clang_path: Path,
     clangxx_path: Path,
     llvm_install_dir: Path,
@@ -352,5 +355,5 @@ def get_raja_cmake_args(
         "-DOpenMP_CXX_LIB_NAMES=omp",
         "-DOpenMP_C_LIB_NAMES=omp",
         f"-DOpenMP_omp_LIBRARY={omp_lib_path}",
-        "../source",
+        str(source_dir),
     ]

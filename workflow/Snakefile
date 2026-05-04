@@ -1,0 +1,65 @@
+from pathlib import Path
+import sys
+
+
+REPO_ROOT = Path(workflow.basedir).resolve().parent
+
+
+configfile: str(REPO_ROOT / "config.yml")
+
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workflow.scripts.common import get_layout_paths, normalize_workflow_config, resolve_llvm_version
+
+
+WORKFLOW_CONFIG = normalize_workflow_config(config)
+BASE_DIR = Path(WORKFLOW_CONFIG["project"]["base_dir"]).expanduser().resolve()
+RUN_LABEL = str(WORKFLOW_CONFIG["runs"]["run_label"])
+
+LLVM_TAG = str(WORKFLOW_CONFIG["llvm"]["tags"][0])
+LLVM_VERSION = resolve_llvm_version(LLVM_TAG)
+
+OFFICIAL_TAG = str(WORKFLOW_CONFIG["test_suite"]["official"]["tags"][0])
+RAJA_TAG = str(WORKFLOW_CONFIG["test_suite"]["raja"]["tags"][0])
+
+LAYOUT = get_layout_paths(BASE_DIR, LLVM_TAG, OFFICIAL_TAG, RAJA_TAG, LLVM_VERSION, RUN_LABEL)
+
+
+rule all:
+    input:
+        str(LAYOUT["llvm_install"] / "bin" / "clang++"),
+        str(LAYOUT["llvm_build"] / ".build_complete"),
+
+
+rule checkout_llvm:
+    output:
+        source_dir=directory(str(LAYOUT["llvm_source"])),
+        stamp=str(LAYOUT["llvm_source"] / ".checkout_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "checkout_llvm.log"),
+    params:
+        repo_url=WORKFLOW_CONFIG["llvm"]["repo_url"],
+        tag_or_branch=LLVM_TAG,
+    script:
+        "scripts/checkout_repo.py"
+
+
+rule build_llvm:
+    input:
+        checkout_stamp=str(LAYOUT["llvm_source"] / ".checkout_complete"),
+    output:
+        clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
+        stamp=str(LAYOUT["llvm_build"] / ".build_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "build_llvm.log"),
+    params:
+        source_dir=str(LAYOUT["llvm_source"]),
+        build_dir=str(LAYOUT["llvm_build"]),
+        install_dir=str(LAYOUT["llvm_install"]),
+        host_c_compiler=WORKFLOW_CONFIG["llvm"]["build"]["c_compiler"],
+        host_cxx_compiler=WORKFLOW_CONFIG["llvm"]["build"]["cxx_compiler"],
+        ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
+    script:
+        "scripts/build_llvm.py"
