@@ -29,10 +29,10 @@ LAYOUT = get_layout_paths(BASE_DIR, LLVM_TAG, OFFICIAL_TAG, RAJA_TAG, LLVM_VERSI
 
 rule all:
     input:
-        str(LAYOUT["llvm_install"] / "bin" / "clang++"),
-        str(LAYOUT["llvm_build"] / ".build_complete"),
-        str(LAYOUT["official_build"] / ".build_complete"),
-        str(LAYOUT["raja_build"] / ".build_complete"),
+        str(LAYOUT["official_result"] / "baseline_results.json"),
+        str(LAYOUT["official_result"] / ".run_complete"),
+        str(LAYOUT["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
+        str(LAYOUT["raja_result"] / ".run_complete"),
 
 
 rule checkout_llvm:
@@ -133,3 +133,34 @@ rule build_raja:
         ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
     script:
         "scripts/build_raja.py"
+
+
+rule run_official:
+    input:
+        build_stamp=str(LAYOUT["official_build"] / ".build_complete"),
+        llvm_clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
+    output:
+        results=str(LAYOUT["official_result"] / "baseline_results.json"),
+        stamp=str(LAYOUT["official_result"] / ".run_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "run_official.log"),
+    params:
+        build_dir=str(LAYOUT["official_build"]),
+    script:
+        "scripts/run_official.py"
+
+
+rule run_raja:
+    input:
+        build_stamp=str(LAYOUT["raja_build"] / ".build_complete"),
+        exe=str(LAYOUT["raja_build"] / "bin" / "raja-perf.exe"),
+    output:
+        results=str(LAYOUT["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
+        stamp=str(LAYOUT["raja_result"] / ".run_complete"),
+    log:
+        str(LAYOUT["logs_run_dir"] / "run_raja.log"),
+    params:
+        exe=str(LAYOUT["raja_build"] / "bin" / "raja-perf.exe"),
+        result_dir=str(LAYOUT["raja_result"]),
+    script:
+        "scripts/run_raja.py"

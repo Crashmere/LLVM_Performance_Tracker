@@ -505,6 +505,110 @@ python3 -m py_compile \
 - 尚未执行真实 suite 构建
   - 本阶段重点是规则契约、依赖表达和并行结构验证
 
+## 阶段 6：接入 benchmark 运行规则
+
+### 目标
+
+- 让 Snakemake 负责 Official 和 RAJA benchmark 的实际运行阶段
+- 让运行规则显式依赖上游 build 产物与 build stamp
+- 让输出路径显式包含：
+  - suite tag
+  - llvm version
+  - run_label
+- 让 `rule all` 默认指向 benchmark 原始结果产物，而不再只停留在 build 完成
+
+### 实际修改
+
+- 修改 [`workflow/Snakefile`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/Snakefile)
+  - 新增 `run_official`
+  - 新增 `run_raja`
+  - 更新 `rule all`
+    - 默认目标现在指向：
+      - `results/official-<official_tag>/<llvm_version>/<run_label>/baseline_results.json`
+      - `results/official-<official_tag>/<llvm_version>/<run_label>/.run_complete`
+      - `results/raja-<raja_tag>/<llvm_version>/<run_label>/RAJAPerf-kernel-run-data.csv`
+      - `results/raja-<raja_tag>/<llvm_version>/<run_label>/.run_complete`
+- 新增 [`workflow/scripts/run_official.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/run_official.py)
+  - 使用 `lit -v -o <baseline_results.json> <build_dir>` 运行 Official benchmark
+  - 自动尝试从 `PATH` 或当前 Python 环境解析 `lit` 可执行文件
+  - 输出 `.run_complete`
+- 新增 [`workflow/scripts/run_raja.py`](/home/eidf018/eidf018/s2778911-aspp/msc/workflow/scripts/run_raja.py)
+  - 在结果目录中执行 `raja-perf.exe`
+  - 检查 `RAJAPerf-kernel-run-data.csv` 是否实际生成
+  - 输出 `.run_complete`
+
+### 规则设计说明
+
+- `run_official`
+  - 输入：
+    - `builds/official/<official_tag>/llvm-<llvm_version>/.build_complete`
+    - `installs/llvm/<llvm_tag>/bin/clang++`
+  - 输出：
+    - `results/official-<official_tag>/<llvm_version>/<run_label>/baseline_results.json`
+    - `results/official-<official_tag>/<llvm_version>/<run_label>/.run_complete`
+- `run_raja`
+  - 输入：
+    - `builds/raja/<raja_tag>/llvm-<llvm_version>/.build_complete`
+    - `builds/raja/<raja_tag>/llvm-<llvm_version>/bin/raja-perf.exe`
+  - 输出：
+    - `results/raja-<raja_tag>/<llvm_version>/<run_label>/RAJAPerf-kernel-run-data.csv`
+    - `results/raja-<raja_tag>/<llvm_version>/<run_label>/.run_complete`
+
+### 验证
+
+- 运行语法检查：
+
+```bash
+python3 -m py_compile \
+  workflow/scripts/run_official.py \
+  workflow/scripts/run_raja.py \
+  workflow/scripts/checkout_repo.py \
+  workflow/scripts/build_llvm.py \
+  workflow/scripts/build_official.py \
+  workflow/scripts/build_raja.py \
+  workflow/scripts/common.py \
+  benchmark_pipeline.py
+```
+
+- 运行 Snakemake dry-run：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile -n -j 2 -p
+```
+
+- 运行 DAG 可视化文本输出：
+
+```bash
+.venv/bin/snakemake -s workflow/Snakefile --dag
+```
+
+- 验证结果
+  - Snakemake 成功解析包含 9 个 job 的 DAG：
+    - `checkout_llvm`
+    - `checkout_official`
+    - `checkout_raja`
+    - `build_llvm`
+    - `build_official`
+    - `build_raja`
+    - `run_official`
+    - `run_raja`
+    - `all`
+  - `run_official` 显式依赖 Official build stamp 和 LLVM `clang++`
+  - `run_raja` 显式依赖 RAJA build stamp 和 `raja-perf.exe`
+  - 结果路径均显式包含 `suite tag / llvm version / run_label`
+  - `rule all` 已推进到 benchmark 原始结果层
+  - 每个运行 rule 都配置了独立日志文件：
+    - `run_official.log`
+    - `run_raja.log`
+
+### 当前状态说明
+
+- 阶段 6 的目标已完成
+- Benchmark 运行阶段已经接入 Snakemake DAG
+- 同一参数组合下只要 `run_label` 不同，就会自然落到不同结果目录并共存
+- 尚未执行真实 benchmark
+  - 本阶段重点是规则契约、输出布局与依赖结构验证
+
 ## 后续追加约定
 
 - 每完成一个迁移阶段，就在本文件追加一节
