@@ -1,3 +1,4 @@
 auto/
 .venv/
 __pycache__
+.snakemake/
