@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import subprocess
 from datetime import datetime
 from pathlib import Path
