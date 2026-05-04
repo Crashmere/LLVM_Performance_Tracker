@@ -35,11 +35,12 @@ from typing import Any
 
 from workflow.scripts.common import (
     build_with_cmake,
+    get_layout_paths,
     get_llvm_cmake_args,
     get_official_cmake_args,
     get_raja_cmake_args,
-    get_resolved_tag,
     load_config,
+    normalize_workflow_config,
     normalize_ninja_jobs,
     prepare_git_repo,
     resolve_llvm_version,
@@ -54,12 +55,13 @@ if not CONFIG_FILE.exists():
     print(f"Error: Configuration file not found at {CONFIG_FILE}")
     sys.exit(1)
 
-config: dict[str, Any] = load_config(CONFIG_FILE)
+raw_config: dict[str, Any] = load_config(CONFIG_FILE)
+config: dict[str, Any] = normalize_workflow_config(raw_config)
 
 BASE_DIR = Path(config["project"]["base_dir"]).expanduser().resolve()
-RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
+RUN_LABEL = str(config["runs"]["run_label"])
 
-LLVM_TAG = str(config["llvm"].get("tag", "latest"))
+LLVM_TAG = str(config["llvm"]["tags"][0])
 LLVM_VERSION = resolve_llvm_version(LLVM_TAG)
 
 LLVM_REPO_URL = config["llvm"]["repo_url"]
@@ -67,19 +69,20 @@ NINJA_JOBS = normalize_ninja_jobs(config["llvm"]["build"].get("ninja_jobs", []))
 HOST_C_COMPILER = config["llvm"]["build"].get("c_compiler", "gcc")
 HOST_CXX_COMPILER = config["llvm"]["build"].get("cxx_compiler", "g++")
 
-OFFICIAL_REPO_URL = config["test_suite"]["official_repo_url"]
-OFFICIAL_TAG = str(config["test_suite"].get("official_tag", "latest"))
-OFFICIAL_CXX_STD = str(config["test_suite"].get("official_cxx_standard", "17"))
+OFFICIAL_REPO_URL = config["test_suite"]["official"]["repo_url"]
+OFFICIAL_TAG = str(config["test_suite"]["official"]["tags"][0])
+OFFICIAL_CXX_STD = str(config["test_suite"]["official"].get("cxx_standard", "17"))
 
-RAJA_REPO_URL = config["test_suite"]["raja_repo_url"]
-RAJA_TAG = str(config["test_suite"].get("raja_tag", "latest"))
-RAJA_CXX_STD = str(config["test_suite"].get("raja_cxx_standard", "17"))
+RAJA_REPO_URL = config["test_suite"]["raja"]["repo_url"]
+RAJA_TAG = str(config["test_suite"]["raja"]["tags"][0])
+RAJA_CXX_STD = str(config["test_suite"]["raja"].get("cxx_standard", "17"))
 
-LLVM_CUSTOM_DIR = BASE_DIR / f"compiler/llvm-{LLVM_VERSION}-custom"
+LAYOUT = get_layout_paths(BASE_DIR, LLVM_TAG, OFFICIAL_TAG, RAJA_TAG, LLVM_VERSION, RUN_LABEL)
+LLVM_CUSTOM_DIR = LAYOUT["llvm_install"]
 CLANGXX_PATH = LLVM_CUSTOM_DIR / "bin" / "clang++"
 CLANG_PATH = LLVM_CUSTOM_DIR / "bin" / "clang"
 
-LOG_DIR = BASE_DIR / f"logs/{LLVM_VERSION}/{RUN_ID}"
+LOG_DIR = LAYOUT["logs_run_dir"]
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 SUMMARY_LOG_FILE = LOG_DIR / "00_summary.log"
 CURRENT_LOG_FILE: Path | None = None
@@ -132,29 +135,32 @@ def run_cmd(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None 
 def setup_directories() -> tuple[Path, Path]:
     set_current_log("01_init_directories")
     print_step("Phase 1: Initializing directory structure...")
-    
-    resolved_official_tag = get_resolved_tag(OFFICIAL_REPO_URL, OFFICIAL_TAG, print_step)
-    resolved_raja_tag = get_resolved_tag(RAJA_REPO_URL, RAJA_TAG, print_step)
-    
-    RESULTS_BASE_DIR = BASE_DIR / "results"
-    
-    official_result_dir = RESULTS_BASE_DIR / f"official-{resolved_official_tag}/{LLVM_VERSION}/{RUN_ID}"
-    raja_result_dir = RESULTS_BASE_DIR / f"raja-{resolved_raja_tag}/{LLVM_VERSION}/{RUN_ID}"
 
     dirs_to_create = [
-        BASE_DIR / "official" / "source",
-        BASE_DIR / "official" / "build",
-        BASE_DIR / "raja" / "source",
-        BASE_DIR / "raja" / "build",
-        BASE_DIR / "compiler",
-        official_result_dir,
-        raja_result_dir
+        LAYOUT["sources_root"],
+        LAYOUT["builds_root"],
+        LAYOUT["installs_root"],
+        LAYOUT["results_root"],
+        LAYOUT["parsed_root"],
+        LAYOUT["reports_root"],
+        LAYOUT["logs_root"],
+        LAYOUT["llvm_source"].parent,
+        LAYOUT["official_source"].parent,
+        LAYOUT["raja_source"].parent,
+        LAYOUT["llvm_build"].parent,
+        LAYOUT["official_build"].parent,
+        LAYOUT["raja_build"].parent,
+        LAYOUT["llvm_install"].parent,
+        LAYOUT["official_result"],
+        LAYOUT["raja_result"],
     ]
 
     for d in dirs_to_create:
         d.mkdir(parents=True, exist_ok=True)
-        
-    return official_result_dir, raja_result_dir
+
+    print_step(f"Using run_label: {RUN_LABEL}")
+    print_step(f"LLVM source/build/install directories: {LAYOUT['llvm_source']} | {LAYOUT['llvm_build']} | {LAYOUT['llvm_install']}")
+    return LAYOUT["official_result"], LAYOUT["raja_result"]
 
 def build_llvm() -> bool:
     set_current_log("02_build_llvm")
@@ -165,8 +171,8 @@ def build_llvm() -> bool:
         return True
 
     print_step(f"Phase 2: Building and installing LLVM (Tag: {LLVM_TAG})...")
-    llvm_project_dir = BASE_DIR / "compiler/llvm-project"
-    llvm_build_dir = llvm_project_dir / "build"
+    llvm_project_dir = LAYOUT["llvm_source"]
+    llvm_build_dir = LAYOUT["llvm_build"]
 
     if not prepare_git_repo(LLVM_REPO_URL, llvm_project_dir, LLVM_TAG, run_cmd, print_step):
         return False
@@ -180,8 +186,8 @@ def build_llvm() -> bool:
 def build_official_suite() -> bool:
     set_current_log("03_build_official_suite")
     print_step(f"Phase 3: Building LLVM Official Test Suite (Tag: {OFFICIAL_TAG}, C++{OFFICIAL_CXX_STD})...")
-    official_src_dir = BASE_DIR / "official/source"
-    official_build_dir = BASE_DIR / "official/build"
+    official_src_dir = LAYOUT["official_source"]
+    official_build_dir = LAYOUT["official_build"]
 
     if not prepare_git_repo(OFFICIAL_REPO_URL, official_src_dir, OFFICIAL_TAG, run_cmd, print_step):
         return False
@@ -195,8 +201,8 @@ def build_official_suite() -> bool:
 def build_raja_suite() -> bool:
     set_current_log("04_build_raja_suite")
     print_step(f"Phase 4: Building RAJA Performance Suite (Tag: {RAJA_TAG}, C++{RAJA_CXX_STD})...")
-    raja_src_dir = BASE_DIR / "raja/source"
-    raja_build_dir = BASE_DIR / "raja/build"
+    raja_src_dir = LAYOUT["raja_source"]
+    raja_build_dir = LAYOUT["raja_build"]
 
     if not prepare_git_repo(RAJA_REPO_URL, raja_src_dir, RAJA_TAG, run_cmd, print_step, recursive=True):
         return False
@@ -218,13 +224,13 @@ def run_benchmarks(official_result_dir: Path, raja_result_dir: Path,
         set_current_log("05_run_official_benchmark")
         print_step("Phase 5.1: Executing LLVM Official Test Suite...")
         lit_exe = Path(sys.prefix) / "bin" / "lit"
-        official_build_dir = BASE_DIR / "official/build"
+        official_build_dir = LAYOUT["official_build"]
         lit_cmd = [
             str(lit_exe), "-v", "-o",
             str(official_result_dir / "baseline_results.json"),
             str(official_build_dir)
         ]
-        if run_cmd(lit_cmd, cwd=BASE_DIR / "official"):
+        if run_cmd(lit_cmd, cwd=official_build_dir.parent):
             print_step("Official Test Suite executed successfully.")
         else:
             print_step("[WARNING] Official Test Suite execution encountered errors.")
@@ -232,7 +238,7 @@ def run_benchmarks(official_result_dir: Path, raja_result_dir: Path,
     if run_raja:
         set_current_log("06_run_raja_benchmark")
         print_step("Phase 5.2: Executing RAJA Performance Suite...")
-        raja_build_dir = BASE_DIR / "raja/build"
+        raja_build_dir = LAYOUT["raja_build"]
         raja_exe = raja_build_dir / "bin/raja-perf.exe"
         if run_cmd([str(raja_exe)], cwd=raja_result_dir):
             print_step("RAJA Performance Suite executed successfully.")

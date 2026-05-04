@@ -1,19 +1,27 @@
 project:
   base_dir: "~/msc/auto"
 
+runs:
+  run_label: "20260504_120000"
+
 llvm:
-  tag: "llvmorg-21.1.0"
   repo_url: "https://github.com/llvm/llvm-project.git"
+  tags:
+    - "llvmorg-21.1.0"
   build:
     c_compiler: "gcc"
     cxx_compiler: "g++"
     ninja_jobs: []
 
 test_suite:
-  official_repo_url: "https://github.com/llvm/llvm-test-suite.git"
-  official_tag: "llvmorg-21.1.0"
-  official_cxx_standard: "17" 
-  
-  raja_repo_url: "https://github.com/LLNL/RAJAPerf.git"
-  raja_tag: "v2025.12.0"
-  raja_cxx_standard: "17"
+  official:
+    repo_url: "https://github.com/llvm/llvm-test-suite.git"
+    tags:
+      - "llvmorg-21.1.0"
+    cxx_standard: "17"
+
+  raja:
+    repo_url: "https://github.com/LLNL/RAJAPerf.git"
+    tags:
+      - "v2025.12.0"
+    cxx_standard: "17"

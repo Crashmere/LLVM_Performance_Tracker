@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,10 +23,117 @@ def load_config(config_file: Path) -> dict[str, Any]:
     return config
 
 
+def _ensure_list(value: Any, *, default: list[str] | None = None) -> list[str]:
+    if value is None:
+        return list(default or [])
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _nested_get(mapping: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return default
+        current = current[key]
+    return current
+
+
+def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
+    project = config.get("project", {})
+    llvm = config.get("llvm", {})
+    test_suite = config.get("test_suite", {})
+    official = test_suite.get("official", {})
+    raja = test_suite.get("raja", {})
+    runs = config.get("runs", {})
+
+    llvm_tags = _ensure_list(llvm.get("tags"))
+    if not llvm_tags:
+        llvm_tags = _ensure_list(llvm.get("tag"), default=["latest"])
+
+    official_tags = _ensure_list(official.get("tags"))
+    if not official_tags:
+        official_tags = _ensure_list(test_suite.get("official_tag"), default=["latest"])
+
+    raja_tags = _ensure_list(raja.get("tags"))
+    if not raja_tags:
+        raja_tags = _ensure_list(test_suite.get("raja_tag"), default=["latest"])
+
+    run_label = runs.get("run_label")
+    if not run_label:
+        run_label = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    return {
+        "project": {
+            "base_dir": project["base_dir"],
+        },
+        "runs": {
+            "run_label": str(run_label),
+        },
+        "llvm": {
+            "repo_url": llvm["repo_url"],
+            "tags": llvm_tags,
+            "build": {
+                "c_compiler": _nested_get(llvm, "build", "c_compiler", default="gcc"),
+                "cxx_compiler": _nested_get(llvm, "build", "cxx_compiler", default="g++"),
+                "ninja_jobs": _nested_get(llvm, "build", "ninja_jobs", default=[]),
+            },
+        },
+        "test_suite": {
+            "official": {
+                "repo_url": official.get("repo_url", test_suite.get("official_repo_url")),
+                "tags": official_tags,
+                "cxx_standard": str(
+                    official.get("cxx_standard", test_suite.get("official_cxx_standard", "17"))
+                ),
+            },
+            "raja": {
+                "repo_url": raja.get("repo_url", test_suite.get("raja_repo_url")),
+                "tags": raja_tags,
+                "cxx_standard": str(
+                    raja.get("cxx_standard", test_suite.get("raja_cxx_standard", "17"))
+                ),
+            },
+        },
+    }
+
+
 def resolve_llvm_version(llvm_tag: str) -> str:
     if "-" in llvm_tag:
         return llvm_tag.split("-", 1)[1]
     return llvm_tag
+
+
+def get_layout_paths(
+    base_dir: Path,
+    llvm_tag: str,
+    official_tag: str,
+    raja_tag: str,
+    llvm_version: str,
+    run_label: str,
+) -> dict[str, Path]:
+    return {
+        "sources_root": base_dir / "sources",
+        "builds_root": base_dir / "builds",
+        "installs_root": base_dir / "installs",
+        "results_root": base_dir / "results",
+        "parsed_root": base_dir / "parsed",
+        "reports_root": base_dir / "reports",
+        "logs_root": base_dir / "logs",
+        "llvm_source": base_dir / "sources" / "llvm-project" / llvm_tag,
+        "official_source": base_dir / "sources" / "official" / official_tag,
+        "raja_source": base_dir / "sources" / "raja" / raja_tag,
+        "llvm_build": base_dir / "builds" / "llvm" / llvm_tag,
+        "official_build": base_dir / "builds" / "official" / official_tag / f"llvm-{llvm_version}",
+        "raja_build": base_dir / "builds" / "raja" / raja_tag / f"llvm-{llvm_version}",
+        "llvm_install": base_dir / "installs" / "llvm" / llvm_tag,
+        "official_result": base_dir / "results" / f"official-{official_tag}" / llvm_version / run_label,
+        "raja_result": base_dir / "results" / f"raja-{raja_tag}" / llvm_version / run_label,
+        "parsed_run_dir": base_dir / "parsed" / run_label,
+        "reports_run_dir": base_dir / "reports" / run_label,
+        "logs_run_dir": base_dir / "logs" / run_label,
+    }
 
 
 def normalize_ninja_jobs(ninja_jobs: list[Any] | int | str | None) -> list[str]:
