@@ -1,2 +1,3 @@
 auto/
 .venv/
+__pycache__
