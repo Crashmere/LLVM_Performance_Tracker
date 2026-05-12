@@ -1,4 +1,6 @@
 from datetime import datetime
+from itertools import product
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -38,13 +40,177 @@ def _nested_get(mapping: dict[str, Any], *keys: str, default: Any = None) -> Any
     return current
 
 
+def _slugify(value: Any) -> str:
+    text = str(value).strip()
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
+    slug = re.sub(r"_+", "_", slug).strip("._-")
+    return slug or "value"
+
+
+def _normalize_run_labels(runs: dict[str, Any]) -> list[str]:
+    labels = _ensure_list(runs.get("labels"))
+    if not labels:
+        legacy_label = runs.get("run_label")
+        if legacy_label:
+            labels = [str(legacy_label)]
+
+    if not labels:
+        labels = [datetime.now().strftime("%Y%m%d_%H%M%S")]
+
+    repeat_count = _parse_repeat_count(runs.get("repeat_count", 1))
+
+    normalized: list[str] = []
+    for label in labels:
+        label_text = str(label)
+        if repeat_count == 1:
+            normalized.append(label_text)
+            continue
+        for repeat_index in range(1, repeat_count + 1):
+            normalized.append(f"{label_text}_repeat_{repeat_index:02d}")
+
+    return normalized
+
+
+def _parse_repeat_count(value: Any) -> int:
+    try:
+        repeat_count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"runs.repeat_count must be an integer, got {value!r}") from exc
+
+    if repeat_count < 1:
+        raise ValueError(f"runs.repeat_count must be >= 1, got {repeat_count}")
+
+    return repeat_count
+
+
+def _build_experiment_id(llvm_tag: str, official_tag: str, raja_tag: str, run_label: str) -> str:
+    return "__".join(
+        [
+            f"llvm_{_slugify(llvm_tag)}",
+            f"official_{_slugify(official_tag)}",
+            f"raja_{_slugify(raja_tag)}",
+            f"run_{_slugify(run_label)}",
+        ]
+    )
+
+
+def _normalize_simple_experiments(
+    llvm_tags: list[str],
+    official_tags: list[str],
+    raja_tags: list[str],
+    run_labels: list[str],
+) -> list[dict[str, Any]]:
+    experiments: list[dict[str, Any]] = []
+    for llvm_tag, official_tag, raja_tag, run_label in product(llvm_tags, official_tags, raja_tags, run_labels):
+        experiments.append(
+            {
+                "llvm_tag": llvm_tag,
+                "official_tag": official_tag,
+                "raja_tag": raja_tag,
+                "run_label": run_label,
+            }
+        )
+    return experiments
+
+
+def _normalize_explicit_experiments(
+    raw_experiments: list[Any],
+    default_llvm_tags: list[str],
+    default_official_tags: list[str],
+    default_raja_tags: list[str],
+    default_run_labels: list[str],
+    default_platform: str | None,
+) -> list[dict[str, Any]]:
+    experiments: list[dict[str, Any]] = []
+    fallback_llvm_tag = default_llvm_tags[0]
+    fallback_official_tag = default_official_tags[0]
+    fallback_raja_tag = default_raja_tags[0]
+    fallback_run_label = default_run_labels[0]
+
+    for index, raw_experiment in enumerate(raw_experiments, start=1):
+        if not isinstance(raw_experiment, dict):
+            raise ValueError(f"experiments[{index - 1}] must be a mapping.")
+
+        llvm_tag = str(raw_experiment.get("llvm_tag", fallback_llvm_tag))
+        official_tag = str(raw_experiment.get("official_tag", fallback_official_tag))
+        raja_tag = str(raw_experiment.get("raja_tag", fallback_raja_tag))
+
+        run_labels = _ensure_list(raw_experiment.get("run_labels"))
+        if not run_labels:
+            run_label = raw_experiment.get("run_label", fallback_run_label)
+            run_labels = [str(run_label)]
+
+        repeat_count = raw_experiment.get("repeat_count", 1)
+        experiment_runs = _normalize_run_labels({"labels": run_labels, "repeat_count": repeat_count})
+
+        for run_label in experiment_runs:
+            experiments.append(
+                {
+                    "name": raw_experiment.get("name"),
+                    "llvm_tag": llvm_tag,
+                    "official_tag": official_tag,
+                    "raja_tag": raja_tag,
+                    "run_label": run_label,
+                    "platform": raw_experiment.get("platform", default_platform),
+                    "build_profile": raw_experiment.get("build_profile"),
+                }
+            )
+
+    return experiments
+
+
+def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    experiments: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_keys: set[tuple[str, str, str, str]] = set()
+
+    for raw_experiment in raw_experiments:
+        llvm_tag = str(raw_experiment["llvm_tag"])
+        official_tag = str(raw_experiment["official_tag"])
+        raja_tag = str(raw_experiment["raja_tag"])
+        run_label = str(raw_experiment["run_label"])
+        llvm_version = resolve_llvm_version(llvm_tag)
+        experiment_id = _build_experiment_id(llvm_tag, official_tag, raja_tag, run_label)
+        experiment_key = (llvm_tag, official_tag, raja_tag, run_label)
+
+        if experiment_key in seen_keys:
+            raise ValueError(
+                "Duplicate experiment combination detected for "
+                f"llvm_tag={llvm_tag!r}, official_tag={official_tag!r}, "
+                f"raja_tag={raja_tag!r}, run_label={run_label!r}."
+            )
+        if experiment_id in seen_ids:
+            raise ValueError(f"Duplicate experiment_id generated: {experiment_id}")
+
+        seen_keys.add(experiment_key)
+        seen_ids.add(experiment_id)
+
+        experiments.append(
+            {
+                "experiment_id": experiment_id,
+                "name": raw_experiment.get("name"),
+                "llvm_tag": llvm_tag,
+                "llvm_version": llvm_version,
+                "official_tag": official_tag,
+                "raja_tag": raja_tag,
+                "run_label": run_label,
+                "platform": raw_experiment.get("platform"),
+                "build_profile": raw_experiment.get("build_profile"),
+            }
+        )
+
+    return experiments
+
+
 def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     project = config.get("project", {})
+    build = config.get("build", {})
     llvm = config.get("llvm", {})
     test_suite = config.get("test_suite", {})
     official = test_suite.get("official", {})
     raja = test_suite.get("raja", {})
     runs = config.get("runs", {})
+    raw_experiments = config.get("experiments", [])
 
     llvm_tags = _ensure_list(llvm.get("tags"))
     if not llvm_tags:
@@ -58,16 +224,43 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     if not raja_tags:
         raja_tags = _ensure_list(test_suite.get("raja_tag"), default=["latest"])
 
-    run_label = runs.get("run_label")
-    if not run_label:
-        run_label = datetime.now().strftime("%Y%m%d_%H%M%S")
+    repeat_count = _parse_repeat_count(runs.get("repeat_count", 1))
+    run_labels = _normalize_run_labels(runs)
+    default_platform = project.get("default_platform")
+
+    if raw_experiments:
+        normalized_raw_experiments = _normalize_explicit_experiments(
+            raw_experiments=raw_experiments,
+            default_llvm_tags=llvm_tags,
+            default_official_tags=official_tags,
+            default_raja_tags=raja_tags,
+            default_run_labels=run_labels,
+            default_platform=default_platform,
+        )
+        experiment_mode = "explicit"
+    else:
+        normalized_raw_experiments = _normalize_simple_experiments(
+            llvm_tags=llvm_tags,
+            official_tags=official_tags,
+            raja_tags=raja_tags,
+            run_labels=run_labels,
+        )
+        experiment_mode = "simple"
+
+    experiments = _finalize_experiments(normalized_raw_experiments)
 
     return {
         "project": {
             "base_dir": project["base_dir"],
+            "default_platform": default_platform,
+        },
+        "build": {
+            "ninja_jobs": _nested_get(build, "ninja_jobs", default=_nested_get(llvm, "build", "ninja_jobs", default=[])),
         },
         "runs": {
-            "run_label": str(run_label),
+            "run_label": run_labels[0],
+            "labels": run_labels,
+            "repeat_count": repeat_count,
         },
         "llvm": {
             "repo_url": llvm["repo_url"],
@@ -75,7 +268,6 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             "build": {
                 "c_compiler": _nested_get(llvm, "build", "c_compiler", default="gcc"),
                 "cxx_compiler": _nested_get(llvm, "build", "cxx_compiler", default="g++"),
-                "ninja_jobs": _nested_get(llvm, "build", "ninja_jobs", default=[]),
             },
         },
         "test_suite": {
@@ -94,6 +286,8 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
                 ),
             },
         },
+        "experiments": experiments,
+        "experiment_mode": experiment_mode,
     }
 
 
@@ -110,7 +304,11 @@ def get_layout_paths(
     raja_tag: str,
     llvm_version: str,
     run_label: str,
+    experiment_id: str | None = None,
 ) -> dict[str, Path]:
+    parsed_dir_name = experiment_id or run_label
+    reports_dir_name = experiment_id or run_label
+    logs_dir_name = experiment_id or run_label
     return {
         "sources_root": base_dir / "sources",
         "builds_root": base_dir / "builds",
@@ -123,15 +321,27 @@ def get_layout_paths(
         "official_source": base_dir / "sources" / "official" / official_tag,
         "raja_source": base_dir / "sources" / "raja" / raja_tag,
         "llvm_build": base_dir / "builds" / "llvm" / llvm_tag,
-        "official_build": base_dir / "builds" / "official" / official_tag / f"llvm-{llvm_version}",
-        "raja_build": base_dir / "builds" / "raja" / raja_tag / f"llvm-{llvm_version}",
+        "official_build": base_dir / "builds" / "official" / official_tag / f"llvm-{llvm_tag}",
+        "raja_build": base_dir / "builds" / "raja" / raja_tag / f"llvm-{llvm_tag}",
         "llvm_install": base_dir / "installs" / "llvm" / llvm_tag,
-        "official_result": base_dir / "results" / f"official-{official_tag}" / llvm_version / run_label,
-        "raja_result": base_dir / "results" / f"raja-{raja_tag}" / llvm_version / run_label,
-        "parsed_run_dir": base_dir / "parsed" / run_label,
-        "reports_run_dir": base_dir / "reports" / run_label,
-        "logs_run_dir": base_dir / "logs" / run_label,
+        "official_result": base_dir / "results" / f"official-{official_tag}" / llvm_tag / run_label,
+        "raja_result": base_dir / "results" / f"raja-{raja_tag}" / llvm_tag / run_label,
+        "parsed_run_dir": base_dir / "parsed" / parsed_dir_name,
+        "reports_run_dir": base_dir / "reports" / reports_dir_name,
+        "logs_run_dir": base_dir / "logs" / logs_dir_name,
     }
+
+
+def get_experiment_layout_paths(base_dir: Path, experiment: dict[str, Any]) -> dict[str, Path]:
+    return get_layout_paths(
+        base_dir=base_dir,
+        llvm_tag=str(experiment["llvm_tag"]),
+        official_tag=str(experiment["official_tag"]),
+        raja_tag=str(experiment["raja_tag"]),
+        llvm_version=str(experiment["llvm_version"]),
+        run_label=str(experiment["run_label"]),
+        experiment_id=str(experiment["experiment_id"]),
+    )
 
 
 def normalize_ninja_jobs(ninja_jobs: list[Any] | int | str | None) -> list[str]:

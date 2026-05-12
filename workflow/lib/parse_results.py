@@ -235,6 +235,7 @@ def filter_records(
     suite_name: str | None = None,
     compiler_version: str | None = None,
     run_label: str | None = None,
+    suite_versions: dict[str, str] | None = None,
 ) -> list[BenchmarkRecord]:
     filtered = records
     if suite_name:
@@ -243,6 +244,12 @@ def filter_records(
         filtered = [record for record in filtered if record.compiler_version == compiler_version]
     if run_label:
         filtered = [record for record in filtered if record.run_label == run_label]
+    if suite_versions:
+        filtered = [
+            record
+            for record in filtered
+            if record.suite_name not in suite_versions or record.suite_version == suite_versions[record.suite_name]
+        ]
     return filtered
 
 

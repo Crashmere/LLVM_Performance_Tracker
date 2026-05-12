@@ -1,8 +1,29 @@
 project:
   base_dir: "~/msc/auto"
+  # default_platform: "eidf-vm"
 
-# runs:
-#   run_label: "20260504_120001"
+build:
+  ninja_jobs:
+    - "-j"
+    - "6"
+
+runs:
+#   labels:
+#     - "baseline"
+  repeat_count: 3
+
+# experiments:
+#   - name: "llvm-21-baseline"
+#     llvm_tag: "llvmorg-21.1.0"
+#     official_tag: "llvmorg-21.1.0"
+#     raja_tag: "v2025.12.0"
+#     run_label: "baseline"
+#   - name: "llvm-21-repeat"
+#     llvm_tag: "llvmorg-21.1.0"
+#     official_tag: "llvmorg-21.1.0"
+#     raja_tag: "v2025.12.0"
+#     run_label: "baseline"
+#     repeat_count: 3
 
 llvm:
   repo_url: "https://github.com/llvm/llvm-project.git"
@@ -11,7 +32,6 @@ llvm:
   build:
     c_compiler: "gcc"
     cxx_compiler: "g++"
-    ninja_jobs: []
 
 test_suite:
   official:

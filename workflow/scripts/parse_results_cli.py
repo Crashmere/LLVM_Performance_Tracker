@@ -19,17 +19,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--suite-name", help="Optional suite filter, such as official or raja.")
     parser.add_argument("--compiler-version", help="Optional compiler version filter.")
     parser.add_argument("--run-label", help="Optional run label filter.")
+    parser.add_argument(
+        "--suite-version",
+        action="append",
+        default=[],
+        help="Optional suite version filters in the form suite=value, for example official=llvmorg-21.1.0.",
+    )
     return parser.parse_args()
+
+
+def parse_suite_versions(entries: list[str]) -> dict[str, str]:
+    suite_versions: dict[str, str] = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(f"Invalid --suite-version value {entry!r}. Expected suite=value.")
+        suite_name, suite_version = entry.split("=", 1)
+        suite_name = suite_name.strip()
+        suite_version = suite_version.strip()
+        if not suite_name or not suite_version:
+            raise ValueError(f"Invalid --suite-version value {entry!r}. Expected suite=value.")
+        suite_versions[suite_name] = suite_version
+    return suite_versions
 
 
 def main() -> int:
     args = parse_args()
+    suite_versions = parse_suite_versions(args.suite_version)
     records = parse_results_directory(args.input_dir)
     filtered_records = filter_records(
         records,
         suite_name=args.suite_name,
         compiler_version=args.compiler_version,
         run_label=args.run_label,
+        suite_versions=suite_versions,
     )
     output_path = write_records_table(filtered_records, args.output_file)
     print(f"Wrote {len(filtered_records)} benchmark records to {output_path.resolve()}")

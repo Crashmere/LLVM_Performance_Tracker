@@ -11,49 +11,64 @@ configfile: str(REPO_ROOT / "config.yml")
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.lib.common import get_layout_paths, normalize_workflow_config, resolve_llvm_version
+from workflow.lib.common import get_experiment_layout_paths, normalize_workflow_config
 
 
 WORKFLOW_CONFIG = normalize_workflow_config(config)
 BASE_DIR = Path(WORKFLOW_CONFIG["project"]["base_dir"]).expanduser().resolve()
-RUN_LABEL = str(WORKFLOW_CONFIG["runs"]["run_label"])
+EXPERIMENTS = WORKFLOW_CONFIG["experiments"]
+EXPERIMENTS_BY_ID = {experiment["experiment_id"]: experiment for experiment in EXPERIMENTS}
+EXPERIMENT_LAYOUTS = {
+    experiment["experiment_id"]: get_experiment_layout_paths(BASE_DIR, experiment)
+    for experiment in EXPERIMENTS
+}
+EXCLUSIVE_BENCHMARK_THREADS = 9999
 
-LLVM_TAG = str(WORKFLOW_CONFIG["llvm"]["tags"][0])
-LLVM_VERSION = resolve_llvm_version(LLVM_TAG)
+FINAL_REPORTS = [
+    str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["reports_run_dir"] / "benchmark_report.html")
+    for experiment in EXPERIMENTS
+]
 
-OFFICIAL_TAG = str(WORKFLOW_CONFIG["test_suite"]["official"]["tags"][0])
-RAJA_TAG = str(WORKFLOW_CONFIG["test_suite"]["raja"]["tags"][0])
+LLVM_TAGS = sorted({str(experiment["llvm_tag"]) for experiment in EXPERIMENTS})
+OFFICIAL_TAGS = sorted({str(experiment["official_tag"]) for experiment in EXPERIMENTS})
+RAJA_TAGS = sorted({str(experiment["raja_tag"]) for experiment in EXPERIMENTS})
 
-LAYOUT = get_layout_paths(BASE_DIR, LLVM_TAG, OFFICIAL_TAG, RAJA_TAG, LLVM_VERSION, RUN_LABEL)
+
+def experiment_from_wildcards(wildcards):
+    return EXPERIMENTS_BY_ID[wildcards.experiment_id]
+
+
+def layout_from_experiment_id(experiment_id):
+    return EXPERIMENT_LAYOUTS[experiment_id]
 
 
 rule all:
     input:
-        str(LAYOUT["reports_run_dir"] / "benchmark_report.html"),
+        FINAL_REPORTS,
 
 
 rule checkout_llvm:
     output:
-        source_dir=directory(str(LAYOUT["llvm_source"])),
-        stamp=str(LAYOUT["llvm_source"] / ".checkout_complete"),
+        source_dir=directory(str(BASE_DIR / "sources" / "llvm-project" / "{llvm_tag}")),
+        stamp=str(BASE_DIR / "sources" / "llvm-project" / "{llvm_tag}" / ".checkout_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "checkout_llvm.log"),
+        str(BASE_DIR / "logs" / "_shared" / "checkout_llvm" / "{llvm_tag}" / "checkout_llvm.log"),
     params:
         repo_url=WORKFLOW_CONFIG["llvm"]["repo_url"],
-        tag_or_branch=LLVM_TAG,
+        tag_or_branch=lambda wildcards: wildcards.llvm_tag,
     script:
         "scripts/checkout_repo.py"
 
 
 rule checkout_official:
     output:
-        source_dir=directory(str(LAYOUT["official_source"])),
-        stamp=str(LAYOUT["official_source"] / ".checkout_complete"),
+        source_dir=directory(str(BASE_DIR / "sources" / "official" / "{official_tag}")),
+        stamp=str(BASE_DIR / "sources" / "official" / "{official_tag}" / ".checkout_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "checkout_official.log"),
+        str(BASE_DIR / "logs" / "_shared" / "checkout_official" / "{official_tag}" / "checkout_official.log"),
     params:
         repo_url=WORKFLOW_CONFIG["test_suite"]["official"]["repo_url"],
-        tag_or_branch=OFFICIAL_TAG,
+        tag_or_branch=lambda wildcards: wildcards.official_tag,
         recursive=False,
     script:
         "scripts/checkout_repo.py"
@@ -61,13 +76,13 @@ rule checkout_official:
 
 rule checkout_raja:
     output:
-        source_dir=directory(str(LAYOUT["raja_source"])),
-        stamp=str(LAYOUT["raja_source"] / ".checkout_complete"),
+        source_dir=directory(str(BASE_DIR / "sources" / "raja" / "{raja_tag}")),
+        stamp=str(BASE_DIR / "sources" / "raja" / "{raja_tag}" / ".checkout_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "checkout_raja.log"),
+        str(BASE_DIR / "logs" / "_shared" / "checkout_raja" / "{raja_tag}" / "checkout_raja.log"),
     params:
         repo_url=WORKFLOW_CONFIG["test_suite"]["raja"]["repo_url"],
-        tag_or_branch=RAJA_TAG,
+        tag_or_branch=lambda wildcards: wildcards.raja_tag,
         recursive=True,
     script:
         "scripts/checkout_repo.py"
@@ -75,128 +90,155 @@ rule checkout_raja:
 
 rule build_llvm:
     input:
-        checkout_stamp=str(LAYOUT["llvm_source"] / ".checkout_complete"),
+        checkout_stamp=str(BASE_DIR / "sources" / "llvm-project" / "{llvm_tag}" / ".checkout_complete"),
     output:
-        clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
-        stamp=str(LAYOUT["llvm_build"] / ".build_complete"),
+        clangxx=str(BASE_DIR / "installs" / "llvm" / "{llvm_tag}" / "bin" / "clang++"),
+        stamp=str(BASE_DIR / "builds" / "llvm" / "{llvm_tag}" / ".build_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "build_llvm.log"),
+        str(BASE_DIR / "logs" / "_shared" / "build_llvm" / "{llvm_tag}" / "build_llvm.log"),
     params:
-        source_dir=str(LAYOUT["llvm_source"]),
-        build_dir=str(LAYOUT["llvm_build"]),
-        install_dir=str(LAYOUT["llvm_install"]),
+        source_dir=lambda wildcards: str(BASE_DIR / "sources" / "llvm-project" / wildcards.llvm_tag),
+        build_dir=lambda wildcards: str(BASE_DIR / "builds" / "llvm" / wildcards.llvm_tag),
+        install_dir=lambda wildcards: str(BASE_DIR / "installs" / "llvm" / wildcards.llvm_tag),
         host_c_compiler=WORKFLOW_CONFIG["llvm"]["build"]["c_compiler"],
         host_cxx_compiler=WORKFLOW_CONFIG["llvm"]["build"]["cxx_compiler"],
-        ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
+        ninja_jobs=WORKFLOW_CONFIG["build"]["ninja_jobs"],
     script:
         "scripts/build_llvm.py"
 
 
 rule build_official:
     input:
-        checkout_stamp=str(LAYOUT["official_source"] / ".checkout_complete"),
-        llvm_clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
-        llvm_stamp=str(LAYOUT["llvm_build"] / ".build_complete"),
+        checkout_stamp=str(BASE_DIR / "sources" / "official" / "{official_tag}" / ".checkout_complete"),
+        llvm_clangxx=str(BASE_DIR / "installs" / "llvm" / "{llvm_tag}" / "bin" / "clang++"),
+        llvm_stamp=str(BASE_DIR / "builds" / "llvm" / "{llvm_tag}" / ".build_complete"),
     output:
-        cache=str(LAYOUT["official_build"] / "CMakeCache.txt"),
-        stamp=str(LAYOUT["official_build"] / ".build_complete"),
+        cache=str(BASE_DIR / "builds" / "official" / "{official_tag}" / "llvm-{llvm_tag}" / "CMakeCache.txt"),
+        stamp=str(BASE_DIR / "builds" / "official" / "{official_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "build_official.log"),
+        str(
+            BASE_DIR / "logs" / "_shared" / "build_official" / "{official_tag}" / "llvm-{llvm_tag}" / "build_official.log"
+        ),
     params:
-        source_dir=str(LAYOUT["official_source"]),
-        build_dir=str(LAYOUT["official_build"]),
-        llvm_install_dir=str(LAYOUT["llvm_install"]),
+        source_dir=lambda wildcards: str(BASE_DIR / "sources" / "official" / wildcards.official_tag),
+        build_dir=lambda wildcards: str(
+            BASE_DIR / "builds" / "official" / wildcards.official_tag / f"llvm-{wildcards.llvm_tag}"
+        ),
+        llvm_install_dir=lambda wildcards: str(BASE_DIR / "installs" / "llvm" / wildcards.llvm_tag),
         cxx_standard=WORKFLOW_CONFIG["test_suite"]["official"]["cxx_standard"],
-        ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
+        ninja_jobs=WORKFLOW_CONFIG["build"]["ninja_jobs"],
     script:
         "scripts/build_official.py"
 
 
 rule build_raja:
     input:
-        checkout_stamp=str(LAYOUT["raja_source"] / ".checkout_complete"),
-        llvm_clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
-        llvm_stamp=str(LAYOUT["llvm_build"] / ".build_complete"),
+        checkout_stamp=str(BASE_DIR / "sources" / "raja" / "{raja_tag}" / ".checkout_complete"),
+        llvm_clangxx=str(BASE_DIR / "installs" / "llvm" / "{llvm_tag}" / "bin" / "clang++"),
+        llvm_stamp=str(BASE_DIR / "builds" / "llvm" / "{llvm_tag}" / ".build_complete"),
     output:
-        exe=str(LAYOUT["raja_build"] / "bin" / "raja-perf.exe"),
-        stamp=str(LAYOUT["raja_build"] / ".build_complete"),
+        exe=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / "bin" / "raja-perf.exe"),
+        stamp=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "build_raja.log"),
+        str(BASE_DIR / "logs" / "_shared" / "build_raja" / "{raja_tag}" / "llvm-{llvm_tag}" / "build_raja.log"),
     params:
-        source_dir=str(LAYOUT["raja_source"]),
-        build_dir=str(LAYOUT["raja_build"]),
-        llvm_install_dir=str(LAYOUT["llvm_install"]),
+        source_dir=lambda wildcards: str(BASE_DIR / "sources" / "raja" / wildcards.raja_tag),
+        build_dir=lambda wildcards: str(BASE_DIR / "builds" / "raja" / wildcards.raja_tag / f"llvm-{wildcards.llvm_tag}"),
+        llvm_install_dir=lambda wildcards: str(BASE_DIR / "installs" / "llvm" / wildcards.llvm_tag),
         cxx_standard=WORKFLOW_CONFIG["test_suite"]["raja"]["cxx_standard"],
-        ninja_jobs=WORKFLOW_CONFIG["llvm"]["build"]["ninja_jobs"],
+        ninja_jobs=WORKFLOW_CONFIG["build"]["ninja_jobs"],
     script:
         "scripts/build_raja.py"
 
 
 rule run_official:
     input:
-        build_stamp=str(LAYOUT["official_build"] / ".build_complete"),
-        llvm_clangxx=str(LAYOUT["llvm_install"] / "bin" / "clang++"),
+        build_stamp=str(BASE_DIR / "builds" / "official" / "{official_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
+        llvm_clangxx=str(BASE_DIR / "installs" / "llvm" / "{llvm_tag}" / "bin" / "clang++"),
     output:
-        results=str(LAYOUT["official_result"] / "baseline_results.json"),
-        stamp=str(LAYOUT["official_result"] / ".run_complete"),
+        results=str(BASE_DIR / "results" / "official-{official_tag}" / "{llvm_tag}" / "{run_label}" / "baseline_results.json"),
+        stamp=str(BASE_DIR / "results" / "official-{official_tag}" / "{llvm_tag}" / "{run_label}" / ".run_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "run_official.log"),
+        str(BASE_DIR / "logs" / "_runs" / "official" / "{official_tag}" / "{llvm_tag}" / "{run_label}" / "run_official.log"),
+    threads:
+        EXCLUSIVE_BENCHMARK_THREADS
     params:
-        build_dir=str(LAYOUT["official_build"]),
+        build_dir=lambda wildcards: str(BASE_DIR / "builds" / "official" / wildcards.official_tag / f"llvm-{wildcards.llvm_tag}"),
     script:
         "scripts/run_official.py"
 
 
 rule run_raja:
     input:
-        build_stamp=str(LAYOUT["raja_build"] / ".build_complete"),
-        exe=str(LAYOUT["raja_build"] / "bin" / "raja-perf.exe"),
+        build_stamp=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
+        exe=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / "bin" / "raja-perf.exe"),
     output:
-        results=str(LAYOUT["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
-        stamp=str(LAYOUT["raja_result"] / ".run_complete"),
+        results=str(BASE_DIR / "results" / "raja-{raja_tag}" / "{llvm_tag}" / "{run_label}" / "RAJAPerf-kernel-run-data.csv"),
+        stamp=str(BASE_DIR / "results" / "raja-{raja_tag}" / "{llvm_tag}" / "{run_label}" / ".run_complete"),
     log:
-        str(LAYOUT["logs_run_dir"] / "run_raja.log"),
+        str(BASE_DIR / "logs" / "_runs" / "raja" / "{raja_tag}" / "{llvm_tag}" / "{run_label}" / "run_raja.log"),
+    threads:
+        EXCLUSIVE_BENCHMARK_THREADS
     params:
-        exe=str(LAYOUT["raja_build"] / "bin" / "raja-perf.exe"),
-        result_dir=str(LAYOUT["raja_result"]),
+        exe=lambda wildcards: str(BASE_DIR / "builds" / "raja" / wildcards.raja_tag / f"llvm-{wildcards.llvm_tag}" / "bin" / "raja-perf.exe"),
+        result_dir=lambda wildcards: str(BASE_DIR / "results" / f"raja-{wildcards.raja_tag}" / wildcards.llvm_tag / wildcards.run_label),
     script:
         "scripts/run_raja.py"
 
 
 rule parse_results:
     input:
-        official_results=str(LAYOUT["official_result"] / "baseline_results.json"),
-        official_stamp=str(LAYOUT["official_result"] / ".run_complete"),
-        raja_results=str(LAYOUT["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
-        raja_stamp=str(LAYOUT["raja_result"] / ".run_complete"),
+        official_results=lambda wildcards: str(
+            layout_from_experiment_id(wildcards.experiment_id)["official_result"] / "baseline_results.json"
+        ),
+        official_stamp=lambda wildcards: str(
+            layout_from_experiment_id(wildcards.experiment_id)["official_result"] / ".run_complete"
+        ),
+        raja_results=lambda wildcards: str(
+            layout_from_experiment_id(wildcards.experiment_id)["raja_result"] / "RAJAPerf-kernel-run-data.csv"
+        ),
+        raja_stamp=lambda wildcards: str(
+            layout_from_experiment_id(wildcards.experiment_id)["raja_result"] / ".run_complete"
+        ),
     output:
-        parsed_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records.csv"),
+        parsed_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records.csv"),
     log:
-        str(LAYOUT["logs_run_dir"] / "parse_results.log"),
+        str(BASE_DIR / "logs" / "{experiment_id}" / "parse_results.log"),
     params:
-        input_dir=str(LAYOUT["results_root"]),
-        run_label=RUN_LABEL,
+        input_dir=str(BASE_DIR / "results"),
+        run_label=lambda wildcards: experiment_from_wildcards(wildcards)["run_label"],
+        compiler_version=lambda wildcards: experiment_from_wildcards(wildcards)["llvm_tag"],
+        official_tag=lambda wildcards: experiment_from_wildcards(wildcards)["official_tag"],
+        raja_tag=lambda wildcards: experiment_from_wildcards(wildcards)["raja_tag"],
     shell:
-        ".venv/bin/python workflow/scripts/parse_results_cli.py --input-dir {params.input_dir} --run-label {params.run_label} --output-file {output.parsed_csv} > {log} 2>&1"
+        ".venv/bin/python workflow/scripts/parse_results_cli.py "
+        "--input-dir {params.input_dir} "
+        "--run-label {params.run_label} "
+        "--compiler-version {params.compiler_version} "
+        "--suite-version official={params.official_tag} "
+        "--suite-version raja={params.raja_tag} "
+        "--output-file {output.parsed_csv} > {log} 2>&1"
 
 
 rule aggregate_results:
     input:
-        parsed_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records.csv"),
+        parsed_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records.csv"),
     output:
-        aggregated_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records_aggregated.csv"),
+        aggregated_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records_aggregated.csv"),
     log:
-        str(LAYOUT["logs_run_dir"] / "aggregate_results.log"),
+        str(BASE_DIR / "logs" / "{experiment_id}" / "aggregate_results.log"),
     shell:
-        ".venv/bin/python workflow/scripts/aggregate_results_cli.py --input-file {input.parsed_csv} --output-file {output.aggregated_csv} > {log} 2>&1"
+        ".venv/bin/python workflow/scripts/aggregate_results_cli.py "
+        "--input-file {input.parsed_csv} --output-file {output.aggregated_csv} > {log} 2>&1"
 
 
 rule generate_report:
     input:
-        aggregated_csv=str(LAYOUT["parsed_run_dir"] / "benchmark_records_aggregated.csv"),
+        aggregated_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records_aggregated.csv"),
     output:
-        html=str(LAYOUT["reports_run_dir"] / "benchmark_report.html"),
+        html=str(BASE_DIR / "reports" / "{experiment_id}" / "benchmark_report.html"),
     log:
-        str(LAYOUT["logs_run_dir"] / "generate_report.log"),
+        str(BASE_DIR / "logs" / "{experiment_id}" / "generate_report.log"),
     shell:
-        ".venv/bin/python workflow/scripts/generate_report_cli.py --input-file {input.aggregated_csv} --output-html {output.html} > {log} 2>&1"
+        ".venv/bin/python workflow/scripts/generate_report_cli.py "
+        "--input-file {input.aggregated_csv} --output-html {output.html} > {log} 2>&1"
