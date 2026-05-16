@@ -204,6 +204,9 @@ def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[st
 def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     project = config.get("project", {})
     build = config.get("build", {})
+    repositories = config.get("repositories", {})
+    compilers = config.get("compilers", {})
+    suite_defaults = config.get("suite_defaults", {})
     llvm = config.get("llvm", {})
     test_suite = config.get("test_suite", {})
     official = test_suite.get("official", {})
@@ -262,26 +265,64 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             "repeat_count": repeat_count,
         },
         "llvm": {
-            "repo_url": llvm["repo_url"],
+            "repo_url": llvm.get("repo_url", repositories.get("llvm")),
             "tags": llvm_tags,
             "build": {
-                "c_compiler": _nested_get(llvm, "build", "c_compiler", default="gcc"),
-                "cxx_compiler": _nested_get(llvm, "build", "cxx_compiler", default="g++"),
+                "c_compiler": _nested_get(
+                    llvm,
+                    "build",
+                    "c_compiler",
+                    default=_nested_get(compilers, "host", "c", default="gcc"),
+                ),
+                "cxx_compiler": _nested_get(
+                    llvm,
+                    "build",
+                    "cxx_compiler",
+                    default=_nested_get(compilers, "host", "cxx", default="g++"),
+                ),
             },
         },
         "test_suite": {
             "official": {
-                "repo_url": official.get("repo_url", test_suite.get("official_repo_url")),
+                "repo_url": official.get(
+                    "repo_url",
+                    test_suite.get("official_repo_url", repositories.get("official")),
+                ),
                 "tags": official_tags,
                 "cxx_standard": str(
-                    official.get("cxx_standard", test_suite.get("official_cxx_standard", "17"))
+                    official.get(
+                        "cxx_standard",
+                        test_suite.get(
+                            "official_cxx_standard",
+                            _nested_get(
+                                suite_defaults,
+                                "official",
+                                "cxx_standard",
+                                default=suite_defaults.get("cxx_standard", "17"),
+                            ),
+                        ),
+                    )
                 ),
             },
             "raja": {
-                "repo_url": raja.get("repo_url", test_suite.get("raja_repo_url")),
+                "repo_url": raja.get(
+                    "repo_url",
+                    test_suite.get("raja_repo_url", repositories.get("raja")),
+                ),
                 "tags": raja_tags,
                 "cxx_standard": str(
-                    raja.get("cxx_standard", test_suite.get("raja_cxx_standard", "17"))
+                    raja.get(
+                        "cxx_standard",
+                        test_suite.get(
+                            "raja_cxx_standard",
+                            _nested_get(
+                                suite_defaults,
+                                "raja",
+                                "cxx_standard",
+                                default=suite_defaults.get("cxx_standard", "17"),
+                            ),
+                        ),
+                    )
                 ),
             },
         },
