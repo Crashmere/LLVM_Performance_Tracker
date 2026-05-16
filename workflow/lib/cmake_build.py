@@ -13,7 +13,12 @@ def normalize_ninja_jobs(ninja_jobs: list[Any] | int | str | None) -> list[str]:
     if isinstance(ninja_jobs, int):
         return ["-j", str(ninja_jobs)]
     if isinstance(ninja_jobs, str):
-        return [ninja_jobs] if ninja_jobs else []
+        value = ninja_jobs.strip()
+        if not value:
+            return []
+        if value.isdigit():
+            return ["-j", value]
+        return [value]
     return [str(job) for job in ninja_jobs]
 
 
