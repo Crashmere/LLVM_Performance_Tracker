@@ -1,31 +1,32 @@
 # Snakemake Recovery Notes
 
-This workflow keeps Snakemake as the only scheduler. Recovery should normally be done by asking Snakemake for the target you want, not by running workflow stages manually.
-
 ## Common Recovery Commands
+
+`run.sh` passes `--keep-going` to Snakemake by default, so independent jobs can continue after a failure.
+
+Run the workflow in strict mode when you want Snakemake to stop as soon as a job fails:
+
+```bash
+./run.sh strict
+```
 
 Continue after an interrupted run:
 
 ```bash
-./run.sh -- --rerun-incomplete
+./run.sh resume
 ```
 
-Continue independent jobs after a failure in a batch:
+Continue after an interrupted run, but stop immediately on the next failure:
 
 ```bash
-./run.sh -- --keep-going
+./run.sh strict resume
 ```
 
-Rebuild one experiment report and any missing prerequisites:
+For less common recovery targets, use the pass-through form. Snakemake will still receive `--keep-going` unless `strict` is used:
 
 ```bash
 ./run.sh -- auto/reports/<experiment_id>/benchmark_report.html
-```
-
-Force one rule to rerun on the path to a report:
-
-```bash
-./run.sh -- --forcerun run_raja auto/reports/<experiment_id>/benchmark_report.html
+./run.sh strict -- auto/reports/<experiment_id>/benchmark_report.html
 ```
 
 If raw benchmark results already exist and only derived outputs are missing, target the derived output directly. Snakemake will reuse existing raw results when their expected files and stamps are present:
@@ -35,19 +36,25 @@ If raw benchmark results already exist and only derived outputs are missing, tar
 ./run.sh -- auto/reports/<experiment_id>/benchmark_report.html
 ```
 
+To force a specific rule, use Snakemake pass-through arguments:
+
+```bash
+./run.sh -- --forcerun run_raja auto/reports/<experiment_id>/benchmark_report.html
+```
+
 ## Output Summary
 
 The inspection helper is read-only. It scans existing workflow outputs and suggests which artifact is missing:
 
 ```bash
-.venv/bin/python tools/inspect_workflow_outputs.py --base-dir auto
+./run.sh inspect
 ```
 
 Machine-readable formats are also available:
 
 ```bash
-.venv/bin/python tools/inspect_workflow_outputs.py --base-dir auto --format csv
-.venv/bin/python tools/inspect_workflow_outputs.py --base-dir auto --format json
+./run.sh inspect --format csv
+./run.sh inspect --format json
 ```
 
 ## Metadata
@@ -58,8 +65,4 @@ Each experiment report depends on:
 auto/metadata/<experiment_id>/experiment.json
 ```
 
-This file records the normalized experiment, expected output paths, log paths, a config snapshot, and lightweight environment information. It is provenance data, not a mutable job-state database.
-
-## Design Boundary
-
-Do not add a second scheduler around Snakemake. Helper scripts should inspect existing files or write explicit DAG outputs only. They should not silently retry jobs, mutate global status, or call multiple workflow stages behind Snakemake's back.
+This file records the normalized experiment, expected output paths, log paths, a config snapshot, and lightweight environment information.

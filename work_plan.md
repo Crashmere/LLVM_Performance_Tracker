@@ -310,8 +310,9 @@
    - 这个命令不生成调度计划、不写状态、不重跑任务，只帮助用户决定下一条 Snakemake 命令。
 
 5. 明确恢复和补跑模式全部映射为 Snakemake 用法。
-   - 中断后继续：`./run.sh -- --rerun-incomplete`
-   - 批量尽量继续：`./run.sh -- --keep-going`
+   - 中断后继续：`./run.sh resume`
+   - 批量尽量继续：`./run.sh` 默认传递 `--keep-going`
+   - 失败立即停止：`./run.sh strict`
    - 只重建某个报告：`./run.sh -- auto/reports/<experiment_id>/benchmark_report.html`
    - 只重跑某个规则：`./run.sh -- --forcerun run_raja auto/reports/<experiment_id>/benchmark_report.html`
    - 已有原始结果时重建派生产物：直接指定对应 report 或 aggregated CSV target。
@@ -326,7 +327,7 @@
 
 - 每个最终报告都能追溯到一份 experiment metadata。
 - 运行失败时，用户能从 Snakemake 报错定位到对应日志，并在日志中看到清楚的失败命令和期望产物。
-- `./run.sh -- --rerun-incomplete` 和 `./run.sh -- --keep-going` 被文档化并验证可用。
+- `./run.sh` 默认 `--keep-going`、`./run.sh resume` 和 `./run.sh strict` 被文档化并验证可用。
 - 用户可以通过指定 Snakemake target，只重建某个 experiment 的 parsed / aggregated / report，而不重新 checkout/build/run。
 - 汇总命令能列出各 experiment 的关键产物存在性，帮助判断缺的是 raw results、parsed、aggregated 还是 report。
 - 阶段 2 完成后，主入口仍然是 Snakemake / `run.sh`，没有引入新的主调度入口。
