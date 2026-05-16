@@ -1,5 +1,7 @@
 from datetime import datetime
+import hashlib
 from itertools import product
+import os
 import re
 import shutil
 import subprocess
@@ -55,6 +57,11 @@ def _normalize_run_labels(runs: dict[str, Any]) -> list[str]:
             labels = [str(legacy_label)]
 
     if not labels:
+        env_override = os.environ.get("MSC_RUN_LABEL_OVERRIDE")
+        if env_override:
+            labels = [env_override]
+
+    if not labels:
         labels = [datetime.now().strftime("%Y%m%d_%H%M%S")]
 
     repeat_count = _parse_repeat_count(runs.get("repeat_count", 1))
@@ -92,6 +99,24 @@ def _build_experiment_id(llvm_tag: str, official_tag: str, raja_tag: str, run_la
             f"run_{_slugify(run_label)}",
         ]
     )
+
+
+def build_experiment_id(llvm_tag: str, official_tag: str, raja_tag: str, run_label: str) -> str:
+    return _build_experiment_id(llvm_tag, official_tag, raja_tag, run_label)
+
+
+def build_batch_id(experiments: list[dict[str, Any]]) -> str:
+    if not experiments:
+        return "batch_empty"
+
+    run_labels = sorted({str(experiment["run_label"]) for experiment in experiments})
+    label_prefix = _slugify(run_labels[0])
+    if len(run_labels) > 1:
+        label_prefix = f"{label_prefix}_plus_{len(run_labels) - 1}_more"
+
+    digest_source = "\n".join(sorted(str(experiment["experiment_id"]) for experiment in experiments))
+    digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()[:8]
+    return f"batch_{label_prefix}__{digest}"
 
 
 def _normalize_simple_experiments(
@@ -288,6 +313,9 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
         },
         "experiments": experiments,
         "experiment_mode": experiment_mode,
+        "batch": {
+            "batch_id": build_batch_id(experiments),
+        },
     }
 
 

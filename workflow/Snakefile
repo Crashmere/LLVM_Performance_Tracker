@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -12,11 +13,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from workflow.lib.common import get_experiment_layout_paths, normalize_workflow_config
+from workflow.lib.run_manifest import get_batch_paths
 
 
 WORKFLOW_CONFIG = normalize_workflow_config(config)
 BASE_DIR = Path(WORKFLOW_CONFIG["project"]["base_dir"]).expanduser().resolve()
 EXPERIMENTS = WORKFLOW_CONFIG["experiments"]
+BATCH_ID = WORKFLOW_CONFIG["batch"]["batch_id"]
+BATCH_PATHS = get_batch_paths(BASE_DIR, BATCH_ID)
 EXPERIMENTS_BY_ID = {experiment["experiment_id"]: experiment for experiment in EXPERIMENTS}
 EXPERIMENT_LAYOUTS = {
     experiment["experiment_id"]: get_experiment_layout_paths(BASE_DIR, experiment)
@@ -40,6 +44,32 @@ def experiment_from_wildcards(wildcards):
 
 def layout_from_experiment_id(experiment_id):
     return EXPERIMENT_LAYOUTS[experiment_id]
+
+
+def write_batch_summary(batch_status):
+    subprocess.run(
+        [
+            str(REPO_ROOT / ".venv" / "bin" / "python"),
+            str(REPO_ROOT / "workflow" / "scripts" / "summarize_run_cli.py"),
+            "--config",
+            str(REPO_ROOT / "config.yml"),
+            "--batch-status",
+            batch_status,
+        ],
+        check=True,
+    )
+
+
+onstart:
+    write_batch_summary("started")
+
+
+onsuccess:
+    write_batch_summary("completed")
+
+
+onerror:
+    write_batch_summary("failed")
 
 
 rule all:
