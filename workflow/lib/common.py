@@ -1,7 +1,6 @@
 from datetime import datetime
 from itertools import product
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -297,76 +296,6 @@ def resolve_llvm_version(llvm_tag: str) -> str:
     return llvm_tag
 
 
-def get_layout_paths(
-    base_dir: Path,
-    llvm_tag: str,
-    official_tag: str,
-    raja_tag: str,
-    llvm_version: str,
-    run_label: str,
-    experiment_id: str | None = None,
-) -> dict[str, Path]:
-    parsed_dir_name = experiment_id or run_label
-    reports_dir_name = experiment_id or run_label
-    logs_dir_name = experiment_id or run_label
-    return {
-        "sources_root": base_dir / "sources",
-        "builds_root": base_dir / "builds",
-        "installs_root": base_dir / "installs",
-        "results_root": base_dir / "results",
-        "parsed_root": base_dir / "parsed",
-        "reports_root": base_dir / "reports",
-        "logs_root": base_dir / "logs",
-        "metadata_root": base_dir / "metadata",
-        "llvm_source": base_dir / "sources" / "llvm-project" / llvm_tag,
-        "official_source": base_dir / "sources" / "official" / official_tag,
-        "raja_source": base_dir / "sources" / "raja" / raja_tag,
-        "llvm_build": base_dir / "builds" / "llvm" / llvm_tag,
-        "official_build": base_dir / "builds" / "official" / official_tag / f"llvm-{llvm_tag}",
-        "raja_build": base_dir / "builds" / "raja" / raja_tag / f"llvm-{llvm_tag}",
-        "llvm_install": base_dir / "installs" / "llvm" / llvm_tag,
-        "official_result": base_dir / "results" / f"official-{official_tag}" / llvm_tag / run_label,
-        "raja_result": base_dir / "results" / f"raja-{raja_tag}" / llvm_tag / run_label,
-        "parsed_run_dir": base_dir / "parsed" / parsed_dir_name,
-        "reports_run_dir": base_dir / "reports" / reports_dir_name,
-        "logs_run_dir": base_dir / "logs" / logs_dir_name,
-        "metadata_run_dir": base_dir / "metadata" / parsed_dir_name,
-    }
-
-
-def get_experiment_layout_paths(base_dir: Path, experiment: dict[str, Any]) -> dict[str, Path]:
-    return get_layout_paths(
-        base_dir=base_dir,
-        llvm_tag=str(experiment["llvm_tag"]),
-        official_tag=str(experiment["official_tag"]),
-        raja_tag=str(experiment["raja_tag"]),
-        llvm_version=str(experiment["llvm_version"]),
-        run_label=str(experiment["run_label"]),
-        experiment_id=str(experiment["experiment_id"]),
-    )
-
-
-def normalize_ninja_jobs(ninja_jobs: list[Any] | int | str | None) -> list[str]:
-    if ninja_jobs is None:
-        return []
-    if isinstance(ninja_jobs, int):
-        return ["-j", str(ninja_jobs)]
-    if isinstance(ninja_jobs, str):
-        return [ninja_jobs] if ninja_jobs else []
-    return [str(job) for job in ninja_jobs]
-
-
-def clear_directory(dir_path: Path) -> None:
-    if not dir_path.exists():
-        return
-
-    for item in dir_path.iterdir():
-        if item.is_dir():
-            shutil.rmtree(item)
-        else:
-            item.unlink()
-
-
 def get_resolved_tag(
     repo_url: str,
     configured_tag: str,
@@ -438,38 +367,6 @@ def prepare_git_repo(
     except subprocess.CalledProcessError:
         if status_callback:
             status_callback(f"[WARNING] Failed to retrieve current commit hash for {target_dir.name}")
-
-    return True
-
-
-def build_with_cmake(
-    build_dir: Path,
-    cmake_args: list[str],
-    ninja_jobs: list[str],
-    run_cmd: RunCommand,
-    status_callback: StatusCallback | None = None,
-    install: bool = False,
-    clear_first: bool = True,
-) -> bool:
-    if clear_first:
-        clear_directory(build_dir)
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    if status_callback:
-        status_callback("Configuring with CMake...")
-    if not run_cmd(["cmake", "-G", "Ninja"] + cmake_args, build_dir, None):
-        return False
-
-    if status_callback:
-        status_callback("Compiling...")
-    if not run_cmd(["ninja"] + ninja_jobs, build_dir, None):
-        return False
-
-    if install:
-        if status_callback:
-            status_callback("Installing...")
-        if not run_cmd(["ninja", "install"], build_dir, None):
-            return False
 
     return True
 

@@ -104,6 +104,7 @@
 - 增加“仅重跑失败版本/失败 suite”的目标规则。
 - 增加“从历史 run 重建派生产物”的规则，例如只凭已有 `results/` 重新生成 parsed/aggregated/report。
 - 增加数据清洗规则，自动识别异常值、空结果、编译失败和运行崩溃。
+- 持续整理 `workflow/lib/` 的模块边界，避免 `common.py` 再次变成混合配置、路径、构建和 suite 细节的工具箱。
 
 ## 4. 总体开发原则
 
@@ -356,8 +357,10 @@
 ### 需要修改/新增的代码或文件
 
 - `workflow/lib/common.py`
+- `workflow/lib/cmake_build.py`
 - `workflow/Snakefile`
 - 新增：
+  - `workflow/lib/build_configs.py` 或 `workflow/lib/cmake_args.py`
   - `workflow/scripts/cleanup_cli.py`
   - `workflow/scripts/disk_usage_report_cli.py`
 
@@ -382,6 +385,12 @@
    - 单个 LLVM install 占用
    - 单个 build 占用
    - 当前 results/parsed/reports 占用
+
+5. 继续整理构建相关模块边界：
+   - `workflow/lib/cmake_build.py` 保持只负责通用 CMake/Ninja 执行流程。
+   - 将 LLVM、Official、RAJA 的 CMake 参数生成函数从 `common.py` 移入 `build_configs.py` 或 `cmake_args.py`。
+   - 将 RAJA OpenMP 探测逻辑与 suite-specific CMake 参数放在同一构建配置模块中，避免 `common.py` 承担 suite 细节。
+   - 如果 build profile 进入配置模型，优先让配置归一化层只产生 profile 名称和参数覆盖，具体 CMake 参数仍由构建配置模块解释。
 
 ### 验收标准
 
@@ -418,6 +427,7 @@
   - `workflow/lib/parsers/official.py`
   - `workflow/lib/parsers/raja.py`
   - `workflow/lib/result_schema.py`
+  - 可选：`workflow/lib/tables.py`
   - `tests/data/` 样例数据
   - `tests/test_parse_results.py`
 
@@ -459,6 +469,11 @@
 6. 输出格式建议升级：
    - 继续保留 CSV，便于人工查看。
    - 把 Parquet 变成默认分析格式，提升后续多版本分析效率。
+
+7. 模块边界整理：
+   - 将 `BenchmarkMetrics`、`BenchmarkRecord` 等数据模型移入 `result_schema.py`。
+   - 将 Official 和 RAJA 的文件发现、schema 检测和字段映射从 `parse_results.py` 中拆出。
+   - 视情况把 `read_table` / `write_table` 这类通用表格 IO 抽到 `tables.py`，供 parser、reporting 和后续分析模块共享。
 
 ### 验收标准
 
@@ -632,6 +647,7 @@
 - `workflow/lib/reporting.py`
 - `workflow/scripts/generate_report_cli.py`
 - 可能新增：
+  - `workflow/lib/analysis.py`
   - `workflow/lib/report_views.py`
   - `app/streamlit_app.py` 或 `app/dash_app.py`
 
@@ -668,6 +684,8 @@
 
 6. 增加历史报告工作流：
    - 允许用户指定一个已有 `run_label` 直接重建 HTML 报告
+   - 将聚合分析逻辑与 Plotly 视图生成解耦，避免 `reporting.py` 同时承担 table IO、统计聚合和可视化布局。
+   - 当差异分析和统计显著性加入后，优先把分析函数放入 `analysis.py`，报告模块只负责把分析结果渲染出来。
    - 允许用户选择多个历史 run 生成对比报告
    - 在报告首页展示数据来源 run、生成时间和输入文件摘要
 
@@ -943,7 +961,11 @@
    - 如何添加新版本
    - 如何导出论文用图表
 
-4. 结果归档建议：
+4. 工程模块边界收尾：
+   - 如果 `common.py` 仍包含大量配置归一化逻辑，将其拆到 `workflow/lib/experiments.py` 或 `workflow/lib/config_model.py`。
+   - 保留 `common.py` 只放少量真正跨模块通用、且没有更明确归属的帮助函数；能归入 layout、cmake_build、build_configs、parser、analysis 的逻辑不再回流到 common。
+
+5. 结果归档建议：
    - 保存最终配置
    - 保存关键对比表
    - 保存关键图表截图或导出文件

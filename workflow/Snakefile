@@ -12,7 +12,8 @@ configfile: str(REPO_ROOT / "config.yml")
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.lib.common import get_experiment_layout_paths, normalize_workflow_config
+from workflow.lib.common import normalize_workflow_config
+from workflow.lib.layout import get_experiment_layout_paths
 
 
 WORKFLOW_CONFIG = normalize_workflow_config(config)
