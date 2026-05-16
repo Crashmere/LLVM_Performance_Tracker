@@ -30,6 +30,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    input_path = Path(args.input_file)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Expected aggregated benchmark table does not exist: {input_path}")
+
     input_df = read_table(args.input_file)
     aggregated_df = ensure_aggregated_records(input_df)
 

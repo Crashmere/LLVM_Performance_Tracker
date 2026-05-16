@@ -317,6 +317,7 @@ def get_layout_paths(
         "parsed_root": base_dir / "parsed",
         "reports_root": base_dir / "reports",
         "logs_root": base_dir / "logs",
+        "metadata_root": base_dir / "metadata",
         "llvm_source": base_dir / "sources" / "llvm-project" / llvm_tag,
         "official_source": base_dir / "sources" / "official" / official_tag,
         "raja_source": base_dir / "sources" / "raja" / raja_tag,
@@ -329,6 +330,7 @@ def get_layout_paths(
         "parsed_run_dir": base_dir / "parsed" / parsed_dir_name,
         "reports_run_dir": base_dir / "reports" / reports_dir_name,
         "logs_run_dir": base_dir / "logs" / logs_dir_name,
+        "metadata_run_dir": base_dir / "metadata" / parsed_dir_name,
     }
 
 

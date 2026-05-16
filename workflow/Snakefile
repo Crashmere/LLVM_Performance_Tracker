@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 
 
@@ -220,6 +221,25 @@ rule parse_results:
         "--output-file {output.parsed_csv} > {log} 2>&1"
 
 
+rule write_experiment_metadata:
+    output:
+        metadata=str(BASE_DIR / "metadata" / "{experiment_id}" / "experiment.json"),
+    log:
+        str(BASE_DIR / "logs" / "{experiment_id}" / "write_experiment_metadata.log"),
+    params:
+        config_file=str(REPO_ROOT / "config.yml"),
+        base_dir=str(BASE_DIR),
+        experiment_json=lambda wildcards: json.dumps(experiment_from_wildcards(wildcards), sort_keys=True),
+        experiment_mode=WORKFLOW_CONFIG["experiment_mode"],
+    shell:
+        ".venv/bin/python workflow/scripts/write_experiment_metadata.py "
+        "--config-file {params.config_file} "
+        "--base-dir {params.base_dir} "
+        "--experiment-json '{params.experiment_json}' "
+        "--experiment-mode {params.experiment_mode} "
+        "--output-file {output.metadata} > {log} 2>&1"
+
+
 rule aggregate_results:
     input:
         parsed_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records.csv"),
@@ -235,6 +255,7 @@ rule aggregate_results:
 rule generate_report:
     input:
         aggregated_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records_aggregated.csv"),
+        metadata=str(BASE_DIR / "metadata" / "{experiment_id}" / "experiment.json"),
     output:
         html=str(BASE_DIR / "reports" / "{experiment_id}" / "benchmark_report.html"),
     log:
