@@ -281,7 +281,7 @@
 - `workflow/lib/common.py`
 - 新增：
   - `workflow/scripts/write_experiment_metadata.py`
-  - `workflow/scripts/summarize_outputs_cli.py`
+  - `tools/inspect_workflow_outputs.py`
   - `docs/recovery.md` 或在 `README.md` 中新增恢复章节
 
 ### 具体修改内容
@@ -305,7 +305,7 @@
    - 失败时仍由 Snakemake 判定 job failed，但脚本日志中应保留清晰的命令、cwd、返回码和期望输出路径。
 
 4. 增加只读汇总命令。
-   - `summarize_outputs_cli.py` 扫描 `auto/metadata/`、`auto/results/`、`auto/parsed/`、`auto/reports/` 和 `auto/logs/`。
+   - `inspect_workflow_outputs.py` 扫描 `auto/metadata/`、`auto/results/`、`auto/parsed/`、`auto/reports/` 和 `auto/logs/`。
    - 输出每个 experiment 的产物存在性摘要，例如 raw results、parsed、aggregated、report 是否存在。
    - 这个命令不生成调度计划、不写状态、不重跑任务，只帮助用户决定下一条 Snakemake 命令。
 

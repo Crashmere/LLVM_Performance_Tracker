@@ -37,17 +37,17 @@ If raw benchmark results already exist and only derived outputs are missing, tar
 
 ## Output Summary
 
-The summary helper is read-only. It scans existing workflow outputs and suggests which artifact is missing:
+The inspection helper is read-only. It scans existing workflow outputs and suggests which artifact is missing:
 
 ```bash
-.venv/bin/python workflow/scripts/summarize_outputs_cli.py --base-dir auto
+.venv/bin/python tools/inspect_workflow_outputs.py --base-dir auto
 ```
 
 Machine-readable formats are also available:
 
 ```bash
-.venv/bin/python workflow/scripts/summarize_outputs_cli.py --base-dir auto --format csv
-.venv/bin/python workflow/scripts/summarize_outputs_cli.py --base-dir auto --format json
+.venv/bin/python tools/inspect_workflow_outputs.py --base-dir auto --format csv
+.venv/bin/python tools/inspect_workflow_outputs.py --base-dir auto --format json
 ```
 
 ## Metadata

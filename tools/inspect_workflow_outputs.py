@@ -8,9 +8,24 @@ from pathlib import Path
 from typing import Any
 
 
+SUMMARY_FIELDS = [
+    "experiment_id",
+    "run_label",
+    "llvm_tag",
+    "official_tag",
+    "raja_tag",
+    "metadata",
+    "raw_results",
+    "parsed",
+    "aggregated",
+    "report",
+    "next_step",
+]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Summarize existing workflow outputs without changing Snakemake state."
+        description="Inspect existing workflow outputs without changing Snakemake state."
     )
     parser.add_argument("--base-dir", default="auto", help="Workflow base directory to scan.")
     parser.add_argument(
@@ -136,28 +151,15 @@ def write_table(records: list[dict[str, Any]]) -> None:
         print("No metadata or report outputs found.")
         return
 
-    fields = [
-        "experiment_id",
-        "run_label",
-        "llvm_tag",
-        "official_tag",
-        "raja_tag",
-        "metadata",
-        "raw_results",
-        "parsed",
-        "aggregated",
-        "report",
-        "next_step",
-    ]
-    widths = {field: len(field) for field in fields}
+    widths = {field: len(field) for field in SUMMARY_FIELDS}
     for record in records:
-        for field in fields:
+        for field in SUMMARY_FIELDS:
             widths[field] = max(widths[field], len(str(record.get(field, ""))))
 
-    print("  ".join(field.ljust(widths[field]) for field in fields))
-    print("  ".join("-" * widths[field] for field in fields))
+    print("  ".join(field.ljust(widths[field]) for field in SUMMARY_FIELDS))
+    print("  ".join("-" * widths[field] for field in SUMMARY_FIELDS))
     for record in records:
-        print("  ".join(str(record.get(field, "")).ljust(widths[field]) for field in fields))
+        print("  ".join(str(record.get(field, "")).ljust(widths[field]) for field in SUMMARY_FIELDS))
 
 
 def main() -> int:
@@ -170,20 +172,7 @@ def main() -> int:
     if args.format == "json":
         print(json.dumps(records, indent=2, sort_keys=True))
     elif args.format == "csv":
-        fields = [
-            "experiment_id",
-            "run_label",
-            "llvm_tag",
-            "official_tag",
-            "raja_tag",
-            "metadata",
-            "raw_results",
-            "parsed",
-            "aggregated",
-            "report",
-            "next_step",
-        ]
-        writer = csv.DictWriter(sys.stdout, fieldnames=fields)
+        writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
         writer.writeheader()
         writer.writerows(records)
     else:
