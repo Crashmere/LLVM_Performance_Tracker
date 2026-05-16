@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -10,32 +9,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from workflow.lib.command_runner import CommandRunner
 from workflow.lib.common import build_with_cmake, get_raja_cmake_args, normalize_ninja_jobs
 
 
-log_path = Path(snakemake.log[0])
-log_path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def log_message(message: str) -> None:
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(f"[{timestamp}] {message}\n")
-
-
-def run_cmd(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> bool:
-    cmd_str = [str(part) for part in cmd if part]
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(f"\n[{datetime.now().strftime('%H:%M:%S')}] Executing: {' '.join(cmd_str)}\n")
-        f.write(f"Working Directory: {cwd or Path.cwd()}\n")
-        f.write("-" * 40 + "\n")
-        f.flush()
-        try:
-            subprocess.run(cmd_str, cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT, check=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            log_message(f"[ERROR] Command failed with exit code {e.returncode}.")
-            return False
+runner = CommandRunner.from_snakemake(snakemake)
 
 
 source_dir = Path(snakemake.params.source_dir)
@@ -60,8 +38,8 @@ success = build_with_cmake(
     build_dir=build_dir,
     cmake_args=cmake_args,
     ninja_jobs=ninja_jobs,
-    run_cmd=run_cmd,
-    status_callback=log_message,
+    run_cmd=runner.run,
+    status_callback=runner.log,
 )
 
 if not success:
