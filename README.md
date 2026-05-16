@@ -292,3 +292,177 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
 - I updated result parsing so `parse_results` can filter by suite version, which makes matrix runs safer and avoids mixing data from different experiment combinations.
 - I moved the shared Ninja parallelism setting into a global build config and added a small `run.sh` wrapper to simplify normal execution and dry runs.
 - I also constrained benchmark execution rules so benchmark jobs do not run in parallel and compete for the same machine resources.
+
+### 阶段二：Snakemake 内聚的恢复、元数据与结构整理
+
+这一阶段最初的目标是做“错误处理、状态恢复与运行清单”。但在重新评估后，我没有继续实现一套独立的 manifest 状态机或 retry 调度器。原因是这些能力会和 Snakemake 自身的 DAG、目标文件、日志和状态管理机制重叠，使入口变复杂，也容易产生“Snakemake 认为失败，但外部 manifest 认为成功”这类状态不一致问题。
+
+因此阶段二的设计收敛为：继续让 Snakemake / `run.sh` 作为唯一主入口，只增强可观测性、恢复体验和 provenance。辅助脚本只做只读检查，不调度、不重跑、不修改 workflow 状态。
+
+#### 主要设计决策
+
+- 不实现全局 mutable manifest。
+- 不实现独立 retry CLI。
+- 不让 helper 脚本绕过 Snakemake 调用多个 workflow stage。
+- 恢复操作优先映射为 Snakemake 原生能力：
+  - `--keep-going`
+  - `--rerun-incomplete`
+  - 指定具体 target
+  - 必要时通过 pass-through 使用 `--forcerun`
+- 每个 experiment 生成一份稳定 metadata，作为 DAG 产物，而不是外部状态数据库。
+- 人工诊断工具放入 `tools/`，不和 Snakemake rule 使用的 `workflow/scripts/` 混在一起。
+
+#### 具体修改
+
+- `workflow/Snakefile`
+  - 新增 `write_experiment_metadata` rule。
+  - `generate_report` 现在依赖：
+    - `benchmark_records_aggregated.csv`
+    - `auto/metadata/<experiment_id>/experiment.json`
+  - 这样每个最终报告都能追溯到对应实验配置、路径和环境摘要。
+
+- `workflow/scripts/write_experiment_metadata.py`
+  - 新增 experiment metadata 生成脚本。
+  - metadata 中记录：
+    - normalized experiment
+    - experiment mode
+    - config snapshot
+    - expected outputs
+    - log paths
+    - hostname、kernel、Python version、Snakemake version 等轻量环境信息
+  - 为了避免自动时间戳 run label 在脚本内二次归一化时变化，metadata 脚本直接接收 `Snakefile` 传入的 normalized experiment JSON。
+
+- `tools/inspect_workflow_outputs.py`
+  - 新增只读检查工具。
+  - 扫描 `auto/metadata/*/experiment.json`，检查 raw results、parsed CSV、aggregated CSV、report HTML 是否存在。
+  - 支持 `table`、`csv`、`json` 输出。
+  - 如果发现旧 report 但没有 metadata，也会作为 orphan report 列出。
+  - 该工具不修改任何文件，也不触发 Snakemake。
+
+- `docs/recovery.md`
+  - 新增恢复说明文档。
+  - 记录常用恢复方式：
+    - `./run.sh resume`
+    - `./run.sh strict`
+    - `./run.sh inspect`
+    - `./run.sh -- <snakemake args...>`
+  - 明确 helper scripts 不能成为第二套调度系统。
+
+- `run.sh`
+  - 默认执行 Snakemake 时加入 `--keep-going`，使批量实验中互不依赖的 job 可以继续运行。
+  - 新增 `strict` 模式，用于失败时立即停止：
+    - `./run.sh strict`
+    - `./run.sh strict resume`
+  - 新增 `inspect` 子命令，调用只读检查工具：
+    - `./run.sh inspect`
+    - `./run.sh inspect --format json`
+  - 保留 `./run.sh -- <args...>` 作为 Snakemake pass-through。
+  - 曾短暂考虑过 `report`、`aggregate`、`force` 子命令，但最后移除，因为这些快捷入口不够通用，直接使用 Snakemake target 更清楚。
+
+- `workflow/lib/command_runner.py`
+  - 新增共享命令执行器。
+  - 把 `checkout_repo.py`、`build_llvm.py`、`build_official.py`、`build_raja.py`、`run_official.py`、`run_raja.py` 中重复的 `run_cmd()` 和 `log_message()` 收敛为 `CommandRunner`。
+  - 各脚本现在通过：
+    - `runner.run`
+    - `runner.log`
+    传入 `prepare_git_repo()` 或 `build_with_cmake()`。
+
+- `workflow/lib/layout.py`
+  - 从 `common.py` 中拆出路径布局函数：
+    - `get_layout_paths()`
+    - `get_experiment_layout_paths()`
+  - 目的在于让路径约定成为独立模块，而不是继续堆在 `common.py` 中。
+
+- `workflow/lib/cmake_build.py`
+  - 从 `common.py` 中拆出通用 CMake/Ninja 构建流程：
+    - `normalize_ninja_jobs()`
+    - `clear_directory()`
+    - `build_with_cmake()`
+  - 保留 `build_with_cmake()` 的执行器注入设计，不把日志逻辑硬写进去。
+
+- `config.yml`
+  - 将配置整理为真正的三段式结构：
+    - 共享配置：`project`、`build`、`repositories`、`compilers`、`suite_defaults`
+    - simple mode：`runs`、`llvm.tags`、`test_suite.*.tags`
+    - explicit mode：注释掉的 `experiments`
+  - `build.ninja_jobs` 从 `["-j", "6"]` 改为数字 `6`。
+  - `suite_defaults` 改为按 suite 分别配置：
+    - `suite_defaults.official.cxx_standard`
+    - `suite_defaults.raja.cxx_standard`
+  - explicit mode 现在可以只依赖共享配置和 `experiments`，不再需要保留 simple mode 的 tags 块。
+
+- `workflow/lib/common.py`
+  - 更新配置归一化逻辑，读取新的共享配置字段：
+    - `repositories.llvm`
+    - `repositories.official`
+    - `repositories.raja`
+    - `compilers.host.c`
+    - `compilers.host.cxx`
+    - `suite_defaults.<suite>.cxx_standard`
+  - 保留旧格式兼容：
+    - `llvm.repo_url`
+    - `llvm.build.*`
+    - `test_suite.*.repo_url`
+    - `test_suite.*.cxx_standard`
+    - `suite_defaults.cxx_standard`
+
+- `workflow/scripts/aggregate_results_cli.py` 和 `workflow/scripts/generate_report_cli.py`
+  - 增加输入文件缺失时的明确错误信息，减少调试时看到底层 pandas/IO 报错的概率。
+
+- `work_plan.md`
+  - 重写阶段二规划，明确“不做第二套 scheduler”的边界。
+  - 记录后续模块边界整理方向：
+    - parser adapter 拆分
+    - reporting / analysis 解耦
+    - suite-specific CMake 参数未来拆出
+    - `common.py` 未来继续收敛
+
+#### 关于当前恢复模型的结论
+
+- 当前系统没有引入独立恢复状态数据库。
+- Snakemake 仍然是唯一调度器。
+- `auto/metadata/<experiment_id>/experiment.json` 是 provenance 产物，不是 mutable run state。
+- `inspect` 只告诉用户当前产物缺什么，不负责决定或执行重跑。
+- 如果用户要重建某个 report 或强制某个 rule，仍然应该通过 Snakemake target 或 pass-through 参数表达。
+
+#### 关于配置结构的结论
+
+- simple mode 现在只保留真正和矩阵展开有关的字段。
+- explicit mode 可以通过取消注释 `experiments` 切换。
+- repo URL、host compiler、suite 默认 C++ 标准都属于共享配置，不再混入 simple mode。
+- `name` 只存在于 explicit experiment 中，作为人工可读标签，不参与唯一性或路径生成。
+- `run_label` 仍然是结果目录隔离和重复实验标识的核心字段。
+
+#### 关于代码结构的结论
+
+- `command_runner.py`、`layout.py`、`cmake_build.py` 已从原先的重复脚本和 `common.py` 中拆出。
+- `common.py` 当前仍保留配置归一化、git 辅助和 suite-specific CMake 参数生成。
+- 后续阶段如果继续扩展 parser、reporting、build profile 或平台支持，应优先拆分：
+  - `workflow/lib/parsers/`
+  - `workflow/lib/result_schema.py`
+  - `workflow/lib/analysis.py`
+  - `workflow/lib/build_configs.py`
+
+#### 验证与结果
+
+- 已执行 `py_compile` 检查受影响 Python 模块。
+- 已多次执行 `./run.sh dry-run` 验证 DAG 展开。
+- 已验证当前 simple mode 配置可以正常归一化。
+- 已用模拟配置验证 explicit mode 在不保留 simple tags 块时仍可归一化。
+- 已验证 `suite_defaults.official.cxx_standard` 和 `suite_defaults.raja.cxx_standard` 可以分别生效。
+- 已验证旧的 `suite_defaults.cxx_standard` 全局写法仍作为 fallback 可用。
+- 已验证 `run.sh inspect` 能正常执行只读检查。
+
+#### Commit Message
+
+Add Snakemake-native recovery metadata and simplify workflow support code.
+Introduce experiment metadata outputs, a read-only output inspection tool, recovery documentation, shared command execution, clearer library boundaries, and a cleaner shared/simple/explicit config structure.
+
+#### Weekly Update
+
+- This week I refined the recovery design so the workflow continues to rely on Snakemake rather than a separate retry or manifest scheduler.
+- I added experiment metadata generation as a normal DAG output, so each report can be traced back to its normalized experiment, expected outputs, logs, config snapshot, and environment summary.
+- I added a read-only inspection tool and connected it through `run.sh inspect`, while keeping all actual reruns and recovery actions expressed through Snakemake targets or options.
+- I simplified repeated command logging code by introducing a shared `CommandRunner`, then updated the checkout, build, and benchmark run scripts to use it.
+- I split path layout and generic CMake/Ninja execution helpers out of `common.py`, which makes the library structure easier to extend in later stages.
+- I also reorganized `config.yml` into shared settings plus simple and explicit mode sections, including numeric Ninja jobs and per-suite C++ standard defaults.
