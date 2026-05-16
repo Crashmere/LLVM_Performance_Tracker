@@ -245,78 +245,91 @@
 
 ---
 
-## 阶段 2：错误处理、状态恢复与运行清单
+## 阶段 2：Snakemake 内聚的可观测性、恢复与实验元数据
 
 ### 目标
 
-落实 MVP 中“严格错误处理和恢复”的要求，把当前“有日志”升级成“可恢复、可追踪、可跳过失败项”的运行系统。
+落实 MVP 中“严格错误处理和恢复”的要求，但不在 Snakemake 之外再实现一套独立调度系统。
+
+本阶段的核心目标是：增强现有 DAG 的可观测性、可诊断性和可恢复性，让用户仍然通过 Snakemake target、`--keep-going`、`--rerun-incomplete`、明确输出文件和少量轻量 helper 命令完成恢复，而不是引入复杂的 manifest 状态机或新的主入口。
+
+换句话说，阶段 2 不应尝试替代 Snakemake 的 job 状态管理，而应把“实验配置、输出路径、日志位置、失败诊断和派生产物重建”整理成更清晰、更可复现的工作流产物。
 
 ### 当前差距
 
-- 当前失败后主要依赖 Snakemake 默认行为和 rule 日志。
-- 没有统一 manifest 描述一次 run 中各实验的状态。
-- 没有失败原因摘要。
-- 没有“仅补跑失败项”的机制。
+- 当前失败后主要依赖 Snakemake 默认报错和分散的 rule 日志。
+- `parsed/`、`reports/` 已按 `experiment_id` 隔离，但每个实验缺少一份轻量的配置快照和 provenance 文件。
+- 失败诊断仍然需要人工在多个日志目录之间跳转。
+- “从已有原始结果重建 parsed / aggregated / report”在 DAG 层已经接近可行，但文档和目标入口还不够明确。
+- 原阶段 2 设想的全局 manifest、每个 rule 主动更新状态、retry CLI 等功能容易和 Snakemake 自身的 DAG 与状态机制重复，增加维护成本和入口复杂度。
 
 ### 需要完成的功能
 
-- 为每次批量执行生成 manifest。
-- 对每个实验记录：
-  - 配置摘要
-  - 当前状态
-  - 开始/结束时间
-  - 失败阶段
-  - 日志路径
-- 支持恢复模式和补跑模式。
-- 支持在批量实验中尽量继续执行未失败项。
-- 支持历史 run 发现与派生产物恢复。
+- 为每个 experiment 生成轻量元数据文件，记录配置、路径和环境摘要。
+- 改善 rule 级日志和错误信息，使失败原因可以从对应日志中快速定位。
+- 明确推荐的恢复方式：
+  - 使用 Snakemake `--rerun-incomplete` 处理中断或半成品。
+  - 使用 Snakemake `--keep-going` 让批量实验尽量跑完其它独立项。
+  - 使用具体 target 只重建某个 experiment 的 parsed / aggregated / report。
+  - 使用 `--forcerun` 或删除特定输出触发某个 rule 重跑。
+- 增加轻量的状态/诊断辅助命令，只负责“读取现有文件并汇总”，不负责调度或修改状态。
+- 把历史 run 恢复设计为普通 Snakemake target，而不是单独的恢复系统。
 
 ### 需要修改/新增的代码或文件
 
 - `workflow/Snakefile`
 - `workflow/lib/common.py`
 - 新增：
-  - `workflow/lib/run_manifest.py`
-  - `workflow/scripts/summarize_run_cli.py`
-  - `workflow/scripts/retry_failed_cli.py`
+  - `workflow/scripts/write_experiment_metadata.py`
+  - `workflow/scripts/summarize_outputs_cli.py`
+  - `docs/recovery.md` 或在 `README.md` 中新增恢复章节
 
 ### 具体修改内容
 
-1. 定义 manifest 文件格式，例如：
-   - `auto/logs/<batch_or_run_label>/manifest.json`
-   - `auto/logs/<batch_or_run_label>/summary.csv`
+1. 新增 experiment metadata 产物。
+   - 建议路径：`auto/metadata/<experiment_id>/experiment.json`
+   - 内容包括：`experiment_id`、`llvm_tag`、`official_tag`、`raja_tag`、`run_label`、`platform`、关键输出路径、日志路径、配置快照、生成时间。
+   - 可选加入轻量环境信息：hostname、CPU 型号、kernel、Python 版本、Snakemake 版本。
 
-2. 每个 rule 在开始和结束时更新状态：
-   - `pending`
-   - `running`
-   - `succeeded`
-   - `failed`
-   - `skipped`
+2. 在 `Snakefile` 中把 metadata 纳入 DAG。
+   - `rule all` 可继续以最终 report 为默认目标。
+   - `generate_report` 可以依赖 experiment metadata，保证报告旁边总有可追溯配置。
+   - 不要求每个 rule 写运行状态，避免并发写文件和状态不一致问题。
 
-3. 在关键脚本中捕获异常并结构化输出失败原因：
+3. 改善关键脚本的失败输出。
    - checkout 失败
    - configure 失败
    - build 失败
    - result missing
    - parse 失败
+   - 失败时仍由 Snakemake 判定 job failed，但脚本日志中应保留清晰的命令、cwd、返回码和期望输出路径。
 
-4. 在批量模式下使用 Snakemake 的继续策略，并配合 manifest 汇总失败项。
+4. 增加只读汇总命令。
+   - `summarize_outputs_cli.py` 扫描 `auto/metadata/`、`auto/results/`、`auto/parsed/`、`auto/reports/` 和 `auto/logs/`。
+   - 输出每个 experiment 的产物存在性摘要，例如 raw results、parsed、aggregated、report 是否存在。
+   - 这个命令不生成调度计划、不写状态、不重跑任务，只帮助用户决定下一条 Snakemake 命令。
 
-5. 提供两个辅助入口：
-   - 生成整次运行摘要
-   - 只重跑失败的实验组合
+5. 明确恢复和补跑模式全部映射为 Snakemake 用法。
+   - 中断后继续：`./run.sh -- --rerun-incomplete`
+   - 批量尽量继续：`./run.sh -- --keep-going`
+   - 只重建某个报告：`./run.sh -- auto/reports/<experiment_id>/benchmark_report.html`
+   - 只重跑某个规则：`./run.sh -- --forcerun run_raja auto/reports/<experiment_id>/benchmark_report.html`
+   - 已有原始结果时重建派生产物：直接指定对应 report 或 aggregated CSV target。
 
-6. 增加历史运行索引和恢复入口：
-   - 列出已有 `run_label`
-   - 判断某个 run 是否已有原始结果、parsed、aggregated、report
-   - 允许仅基于已有原始结果重跑 parse / aggregate / report，而不重新 checkout/build/run
+6. 文档化“不要做”的边界。
+   - 不做全局 mutable manifest 状态机。
+   - 不做独立 retry 调度器。
+   - 不在脚本里绕过 Snakemake 直接调用多个 workflow stage。
+   - 不让 helper CLI 修改 Snakemake 输出或隐藏真实失败。
 
 ### 验收标准
 
-- 一次批量运行结束后，能一眼看出哪些版本成功、哪些失败、失败在哪一步。
-- 某个版本失败不会导致已经成功的数据丢失。
-- 可以只针对失败项重跑，而不是全量重来。
-- 对于历史 run，如果原始 `results/` 还在，即使 `parsed/` 或 `reports/` 丢失，也可以单独恢复。
+- 每个最终报告都能追溯到一份 experiment metadata。
+- 运行失败时，用户能从 Snakemake 报错定位到对应日志，并在日志中看到清楚的失败命令和期望产物。
+- `./run.sh -- --rerun-incomplete` 和 `./run.sh -- --keep-going` 被文档化并验证可用。
+- 用户可以通过指定 Snakemake target，只重建某个 experiment 的 parsed / aggregated / report，而不重新 checkout/build/run。
+- 汇总命令能列出各 experiment 的关键产物存在性，帮助判断缺的是 raw results、parsed、aggregated 还是 report。
+- 阶段 2 完成后，主入口仍然是 Snakemake / `run.sh`，没有引入新的主调度入口。
 
 ---
 
@@ -943,7 +956,7 @@
 按当前代码和时间节点，建议优先顺序如下：
 
 1. 阶段 1：配置模型升级与多版本矩阵执行
-2. 阶段 2：错误处理、状态恢复与运行清单
+2. 阶段 2：Snakemake 内聚的可观测性、恢复与实验元数据
 3. 阶段 4：数据解析层重构与多格式适配
 4. 阶段 5：测试子集选择与运行参数控制
 5. 阶段 3：构建缓存、清理策略与资源管理
@@ -958,7 +971,7 @@
 
 这样排序的原因是：
 
-- 如果不先解决矩阵执行、恢复、解析兼容和测试子集，后面的大规模数据采集会很痛苦。
+- 如果不先解决矩阵执行、Snakemake 内聚的恢复体验、解析兼容和测试子集，后面的大规模数据采集会很痛苦。
 - 如果不能稳定复用历史 run，后续调报告、补 parser、做比较分析时会被迫重复运行 benchmark，成本过高。
 - 报告增强和统计分析要建立在稳定的数据层之上。
 - 自动监控和新 suite 扩展对毕业项目是加分项，但不是当前最急的堵点。
@@ -970,7 +983,7 @@
 ### 里程碑 A：基础设施可用于批量实验
 
 - 已支持多 LLVM 版本矩阵运行
-- 已支持失败项摘要与补跑
+- 已支持清晰失败诊断、产物摘要与 Snakemake target 级补跑
 - 已支持 test subset
 - 已支持从历史 run 重建 parsed / aggregated / report
 - parser 对当前目标版本稳定
