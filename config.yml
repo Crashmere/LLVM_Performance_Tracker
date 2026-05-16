@@ -10,7 +10,7 @@ build:
 runs:
 #   labels:
 #     - "baseline"
-  repeat_count: 3
+  repeat_count: 1
 
 # experiments:
 #   - name: "llvm-21-baseline"
