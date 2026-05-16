@@ -10,7 +10,7 @@ build:
 runs:
 #   labels:
 #     - "baseline"
-  repeat_count: 3
+  repeat_count: 1
 
 # experiments:
 #   - name: "llvm-21-baseline"
@@ -29,6 +29,7 @@ llvm:
   repo_url: "https://github.com/llvm/llvm-project.git"
   tags:
     - "llvmorg-21.1.0"
+    - "llvmorg-20.1.0"
   build:
     c_compiler: "gcc"
     cxx_compiler: "g++"
