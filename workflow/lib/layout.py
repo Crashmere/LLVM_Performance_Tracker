@@ -9,11 +9,8 @@ def get_layout_paths(
     raja_tag: str,
     llvm_version: str,
     run_label: str,
-    experiment_id: str | None = None,
+    experiment_id: str,
 ) -> dict[str, Path]:
-    parsed_dir_name = experiment_id or run_label
-    reports_dir_name = experiment_id or run_label
-    logs_dir_name = experiment_id or run_label
     return {
         "sources_root": base_dir / "sources",
         "builds_root": base_dir / "builds",
@@ -32,10 +29,10 @@ def get_layout_paths(
         "llvm_install": base_dir / "installs" / "llvm" / llvm_tag,
         "official_result": base_dir / "results" / f"official-{official_tag}" / llvm_tag / run_label,
         "raja_result": base_dir / "results" / f"raja-{raja_tag}" / llvm_tag / run_label,
-        "parsed_run_dir": base_dir / "parsed" / parsed_dir_name,
-        "reports_run_dir": base_dir / "reports" / reports_dir_name,
-        "logs_run_dir": base_dir / "logs" / logs_dir_name,
-        "metadata_run_dir": base_dir / "metadata" / parsed_dir_name,
+        "parsed_run_dir": base_dir / "parsed" / experiment_id,
+        "reports_run_dir": base_dir / "reports" / experiment_id,
+        "logs_run_dir": base_dir / "logs" / experiment_id,
+        "metadata_run_dir": base_dir / "metadata" / experiment_id,
     }
 
 

@@ -336,7 +336,7 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
   - 新增只读检查工具。
   - 扫描 `auto/metadata/*/experiment.json`，检查 raw results、parsed CSV、aggregated CSV、report HTML 是否存在。
   - 支持 `table`、`csv`、`json` 输出。
-  - 如果发现旧 report 但没有 metadata，也会作为 orphan report 列出。
+  - 当前只以 metadata 为入口，不再扫描没有 metadata 的旧 report。
   - 该工具不修改任何文件，也不触发 Snakemake。
 
 - `docs/recovery.md`
@@ -399,12 +399,7 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
     - `compilers.host.c`
     - `compilers.host.cxx`
     - `suite_defaults.<suite>.cxx_standard`
-  - 保留旧格式兼容：
-    - `llvm.repo_url`
-    - `llvm.build.*`
-    - `test_suite.*.repo_url`
-    - `test_suite.*.cxx_standard`
-    - `suite_defaults.cxx_standard`
+  - 后续清理中移除了旧格式兼容，配置解析现在只接受当前推荐结构。
 
 - `workflow/scripts/aggregate_results_cli.py` 和 `workflow/scripts/generate_report_cli.py`
   - 增加输入文件缺失时的明确错误信息，减少调试时看到底层 pandas/IO 报错的概率。
@@ -450,7 +445,7 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
 - 已验证当前 simple mode 配置可以正常归一化。
 - 已用模拟配置验证 explicit mode 在不保留 simple tags 块时仍可归一化。
 - 已验证 `suite_defaults.official.cxx_standard` 和 `suite_defaults.raja.cxx_standard` 可以分别生效。
-- 已验证旧的 `suite_defaults.cxx_standard` 全局写法仍作为 fallback 可用。
+- 已移除旧的 `suite_defaults.cxx_standard` 全局写法 fallback。
 - 已验证 `run.sh inspect` 能正常执行只读检查。
 
 #### Commit Message

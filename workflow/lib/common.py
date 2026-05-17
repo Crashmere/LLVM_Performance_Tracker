@@ -30,15 +30,6 @@ def _ensure_list(value: Any, *, default: list[str] | None = None) -> list[str]:
     return [str(value)]
 
 
-def _nested_get(mapping: dict[str, Any], *keys: str, default: Any = None) -> Any:
-    current: Any = mapping
-    for key in keys:
-        if not isinstance(current, dict) or key not in current:
-            return default
-        current = current[key]
-    return current
-
-
 def _slugify(value: Any) -> str:
     text = str(value).strip()
     slug = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
@@ -48,11 +39,6 @@ def _slugify(value: Any) -> str:
 
 def _normalize_run_labels(runs: dict[str, Any]) -> list[str]:
     labels = _ensure_list(runs.get("labels"))
-    if not labels:
-        legacy_label = runs.get("run_label")
-        if legacy_label:
-            labels = [str(legacy_label)]
-
     if not labels:
         labels = [datetime.now().strftime("%Y%m%d_%H%M%S")]
 
@@ -114,30 +100,30 @@ def _normalize_simple_experiments(
 
 def _normalize_explicit_experiments(
     raw_experiments: list[Any],
-    default_llvm_tags: list[str],
-    default_official_tags: list[str],
-    default_raja_tags: list[str],
-    default_run_labels: list[str],
     default_platform: str | None,
 ) -> list[dict[str, Any]]:
     experiments: list[dict[str, Any]] = []
-    fallback_llvm_tag = default_llvm_tags[0]
-    fallback_official_tag = default_official_tags[0]
-    fallback_raja_tag = default_raja_tags[0]
-    fallback_run_label = default_run_labels[0]
+    required_keys = ["llvm_tag", "official_tag", "raja_tag"]
 
     for index, raw_experiment in enumerate(raw_experiments, start=1):
         if not isinstance(raw_experiment, dict):
             raise ValueError(f"experiments[{index - 1}] must be a mapping.")
 
-        llvm_tag = str(raw_experiment.get("llvm_tag", fallback_llvm_tag))
-        official_tag = str(raw_experiment.get("official_tag", fallback_official_tag))
-        raja_tag = str(raw_experiment.get("raja_tag", fallback_raja_tag))
+        missing_keys = [key for key in required_keys if key not in raw_experiment]
+        if missing_keys:
+            raise ValueError(
+                f"experiments[{index - 1}] is missing required key(s): {', '.join(missing_keys)}"
+            )
+
+        llvm_tag = str(raw_experiment["llvm_tag"])
+        official_tag = str(raw_experiment["official_tag"])
+        raja_tag = str(raw_experiment["raja_tag"])
 
         run_labels = _ensure_list(raw_experiment.get("run_labels"))
         if not run_labels:
-            run_label = raw_experiment.get("run_label", fallback_run_label)
-            run_labels = [str(run_label)]
+            run_labels = _ensure_list(raw_experiment.get("run_label"))
+        if not run_labels:
+            run_labels = [datetime.now().strftime("%Y%m%d_%H%M%S")]
 
         repeat_count = raw_experiment.get("repeat_count", 1)
         experiment_runs = _normalize_run_labels({"labels": run_labels, "repeat_count": repeat_count})
@@ -202,41 +188,36 @@ def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[st
 
 
 def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
-    project = config.get("project", {})
-    build = config.get("build", {})
-    repositories = config.get("repositories", {})
-    compilers = config.get("compilers", {})
-    suite_defaults = config.get("suite_defaults", {})
-    llvm = config.get("llvm", {})
-    test_suite = config.get("test_suite", {})
-    official = test_suite.get("official", {})
-    raja = test_suite.get("raja", {})
-    runs = config.get("runs", {})
+    project = config["project"]
+    build = config["build"]
+    repositories = config["repositories"]
+    compilers = config["compilers"]
+    suite_defaults = config["suite_defaults"]
     raw_experiments = config.get("experiments", [])
 
-    llvm_tags = _ensure_list(llvm.get("tags"))
-    if not llvm_tags:
-        llvm_tags = _ensure_list(llvm.get("tag"), default=["latest"])
+    if raw_experiments:
+        llvm_tags: list[str] = []
+        official_tags: list[str] = []
+        raja_tags: list[str] = []
+        runs: dict[str, Any] = {}
+    else:
+        llvm = config["llvm"]
+        test_suite = config["test_suite"]
+        official = test_suite["official"]
+        raja = test_suite["raja"]
+        runs = config.get("runs", {})
 
-    official_tags = _ensure_list(official.get("tags"))
-    if not official_tags:
-        official_tags = _ensure_list(test_suite.get("official_tag"), default=["latest"])
+        llvm_tags = _ensure_list(llvm["tags"])
+        official_tags = _ensure_list(official["tags"])
+        raja_tags = _ensure_list(raja["tags"])
 
-    raja_tags = _ensure_list(raja.get("tags"))
-    if not raja_tags:
-        raja_tags = _ensure_list(test_suite.get("raja_tag"), default=["latest"])
-
-    repeat_count = _parse_repeat_count(runs.get("repeat_count", 1))
     run_labels = _normalize_run_labels(runs)
+    repeat_count = _parse_repeat_count(runs.get("repeat_count", 1))
     default_platform = project.get("default_platform")
 
     if raw_experiments:
         normalized_raw_experiments = _normalize_explicit_experiments(
             raw_experiments=raw_experiments,
-            default_llvm_tags=llvm_tags,
-            default_official_tags=official_tags,
-            default_raja_tags=raja_tags,
-            default_run_labels=run_labels,
             default_platform=default_platform,
         )
         experiment_mode = "explicit"
@@ -257,7 +238,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             "default_platform": default_platform,
         },
         "build": {
-            "ninja_jobs": _nested_get(build, "ninja_jobs", default=_nested_get(llvm, "build", "ninja_jobs", default=[])),
+            "ninja_jobs": build["ninja_jobs"],
         },
         "runs": {
             "run_label": run_labels[0],
@@ -265,65 +246,23 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             "repeat_count": repeat_count,
         },
         "llvm": {
-            "repo_url": llvm.get("repo_url", repositories.get("llvm")),
+            "repo_url": repositories["llvm"],
             "tags": llvm_tags,
             "build": {
-                "c_compiler": _nested_get(
-                    llvm,
-                    "build",
-                    "c_compiler",
-                    default=_nested_get(compilers, "host", "c", default="gcc"),
-                ),
-                "cxx_compiler": _nested_get(
-                    llvm,
-                    "build",
-                    "cxx_compiler",
-                    default=_nested_get(compilers, "host", "cxx", default="g++"),
-                ),
+                "c_compiler": compilers["host"]["c"],
+                "cxx_compiler": compilers["host"]["cxx"],
             },
         },
         "test_suite": {
             "official": {
-                "repo_url": official.get(
-                    "repo_url",
-                    test_suite.get("official_repo_url", repositories.get("official")),
-                ),
+                "repo_url": repositories["official"],
                 "tags": official_tags,
-                "cxx_standard": str(
-                    official.get(
-                        "cxx_standard",
-                        test_suite.get(
-                            "official_cxx_standard",
-                            _nested_get(
-                                suite_defaults,
-                                "official",
-                                "cxx_standard",
-                                default=suite_defaults.get("cxx_standard", "17"),
-                            ),
-                        ),
-                    )
-                ),
+                "cxx_standard": str(suite_defaults["official"]["cxx_standard"]),
             },
             "raja": {
-                "repo_url": raja.get(
-                    "repo_url",
-                    test_suite.get("raja_repo_url", repositories.get("raja")),
-                ),
+                "repo_url": repositories["raja"],
                 "tags": raja_tags,
-                "cxx_standard": str(
-                    raja.get(
-                        "cxx_standard",
-                        test_suite.get(
-                            "raja_cxx_standard",
-                            _nested_get(
-                                suite_defaults,
-                                "raja",
-                                "cxx_standard",
-                                default=suite_defaults.get("cxx_standard", "17"),
-                            ),
-                        ),
-                    )
-                ),
+                "cxx_standard": str(suite_defaults["raja"]["cxx_standard"]),
             },
         },
         "experiments": experiments,

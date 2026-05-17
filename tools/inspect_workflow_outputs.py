@@ -94,35 +94,6 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
-def discover_orphan_reports(base_dir: Path, known_ids: set[str]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    reports_root = base_dir / "reports"
-    if not reports_root.exists():
-        return records
-
-    for report_file in sorted(reports_root.glob("*/benchmark_report.html")):
-        experiment_id = report_file.parent.name
-        if experiment_id in known_ids:
-            continue
-        parsed_dir = base_dir / "parsed" / experiment_id
-        records.append(
-            {
-                "experiment_id": experiment_id,
-                "run_label": "",
-                "llvm_tag": "",
-                "official_tag": "",
-                "raja_tag": "",
-                "metadata": "missing",
-                "raw_results": "unknown",
-                "parsed": "present" if (parsed_dir / "benchmark_records.csv").exists() else "missing",
-                "aggregated": "present" if (parsed_dir / "benchmark_records_aggregated.csv").exists() else "missing",
-                "report": "present",
-                "next_step": "metadata missing; report exists",
-            }
-        )
-    return records
-
-
 def suggest_next_step(
     official_ok: bool,
     raja_ok: bool,
@@ -148,7 +119,7 @@ def suggest_next_step(
 
 def write_table(records: list[dict[str, Any]]) -> None:
     if not records:
-        print("No metadata or report outputs found.")
+        print("No metadata outputs found.")
         return
 
     widths = {field: len(field) for field in SUMMARY_FIELDS}
@@ -166,8 +137,6 @@ def main() -> int:
     args = parse_args()
     base_dir = Path(args.base_dir).expanduser().resolve()
     records = load_metadata_records(base_dir)
-    known_ids = {str(record["experiment_id"]) for record in records}
-    records.extend(discover_orphan_reports(base_dir, known_ids))
 
     if args.format == "json":
         print(json.dumps(records, indent=2, sort_keys=True))

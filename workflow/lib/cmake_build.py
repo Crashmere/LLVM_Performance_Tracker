@@ -1,25 +1,18 @@
 import shutil
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 
 RunCommand = Callable[[list[str], Path | None, dict[str, str] | None], bool]
 StatusCallback = Callable[[str], None]
 
 
-def normalize_ninja_jobs(ninja_jobs: list[Any] | int | str | None) -> list[str]:
-    if ninja_jobs is None:
-        return []
-    if isinstance(ninja_jobs, int):
-        return ["-j", str(ninja_jobs)]
-    if isinstance(ninja_jobs, str):
-        value = ninja_jobs.strip()
-        if not value:
-            return []
-        if value.isdigit():
-            return ["-j", value]
-        return [value]
-    return [str(job) for job in ninja_jobs]
+def normalize_ninja_jobs(ninja_jobs: int) -> list[str]:
+    if not isinstance(ninja_jobs, int):
+        raise TypeError(f"build.ninja_jobs must be an integer, got {type(ninja_jobs).__name__}.")
+    if ninja_jobs < 1:
+        raise ValueError(f"build.ninja_jobs must be >= 1, got {ninja_jobs}.")
+    return ["-j", str(ninja_jobs)]
 
 
 def clear_directory(dir_path: Path) -> None:
