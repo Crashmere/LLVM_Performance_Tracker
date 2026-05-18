@@ -19,16 +19,19 @@
 
 ## 2. 当前系统基线
 
-结合 `workflow/` 和 `auto/` 当前状态，可以把现有系统理解为一个“Snakemake 第一阶段迁移版”，已经具备以下能力：
+结合 `workflow/` 和 `auto/` 当前状态，可以把现有系统理解为一个“Snakemake 阶段二后基线版”，已经具备以下能力：
 
 - 已从单体 Python orchestration 迁移为 Snakemake DAG。
 - 已实现 LLVM、Official test-suite、RAJAPerf 的 checkout / build / run / parse / aggregate / report 全流程。
-- 已引入参数化目录布局，支持按 `llvm_tag`、suite tag、`run_label` 分离源码、构建、结果、报告和日志。
+- 已引入参数化目录布局，支持按 `llvm_tag`、suite tag、`run_label` 复用源码/构建/结果，并按 `experiment_id` 隔离解析结果、报告、元数据和实验级日志。
 - 已能生成统一表格数据：
-  - `auto/parsed/<run_label>/benchmark_records.csv`
-  - `auto/parsed/<run_label>/benchmark_records_aggregated.csv`
+  - `auto/parsed/<experiment_id>/benchmark_records.csv`
+  - `auto/parsed/<experiment_id>/benchmark_records_aggregated.csv`
 - 已能生成 Plotly HTML 报告：
-  - `auto/reports/<run_label>/benchmark_report.html`
+  - `auto/reports/<experiment_id>/benchmark_report.html`
+- 已支持 simple matrix mode 和 explicit experiment mode，可以从配置展开多实验矩阵和重复运行标签。
+- 已为每个 experiment 生成 `auto/metadata/<experiment_id>/experiment.json`，并提供只读 inspect 命令辅助查看已有产物。
+- 已通过 `run.sh` 固化常用入口：默认 `--keep-going`、`resume`、`strict`、`dry-run`、`inspect`。
 - 已验证 RAJA OpenMP 链接链路，采用 `libomp.so` 自动发现 + RPATH 的方案。
 - 已经保留了多次运行结果目录，这对后续重复实验和统计分析是正确方向。
 
@@ -45,15 +48,11 @@
 
 ### 3.2 仍然存在的核心差距
 
-1. 多版本实验能力尚未真正落地。
-   当前配置允许 `tags` 为列表，但 `Snakefile` 实际只取每个列表的第一个元素，尚未展开为版本矩阵。
+1. 构建缓存策略仍偏保守。
+   当前 `build_with_cmake()` 默认清空 build 目录，会削弱同版本重跑、补跑和多实验复用的价值。
 
-2. 容错与恢复能力不足。
-   目前每个 rule 能写日志，但系统还没有：
-   - 统一的 run manifest
-   - 失败状态归档
-   - 版本级 continue-on-error 策略
-   - 中断后恢复到“待补跑项”而不是手工判断
+2. 资源与磁盘可观测性不足。
+   benchmark 已做独占调度，构建并行度也已有基础配置，但系统还缺少 build/install/results 的磁盘占用摘要，以及面向大规模采集的资源使用说明。
 
 3. 数据解析层对格式变化的适应能力有限。
    当前 parser 基本依赖固定文件名、固定字段名，对不同 suite 版本、字段缺失、格式升级的兼容较弱。
@@ -62,10 +61,9 @@
    报告和 work plan 都明确提到要支持用户控制测试范围，以减少运行时间、输出体积和资源消耗。
 
 5. 历史运行数据复用能力还不完整。
-   当前 `parse_results` 虽然可以扫描整个 `results/` 并按 `run_label` 过滤，但这项能力还没有被明确设计成一等功能。系统仍缺少：
-   - 面向历史 run 的显式重解析/重聚合/重出报告入口
-   - 历史 run 可发现性与清单展示
-   - 对“已有原始结果但缺少 parsed/report 产物”场景的恢复支持
+   当前可以通过 Snakemake target 从已有原始结果重建派生产物，也能通过 inspect 查看 metadata-backed experiment，但系统仍缺少：
+   - 面向多个历史 experiment 的显式对比输入模型
+   - 面向历史 experiment/run 的更友好筛选入口
    - 面向跨 run 复用和比较的数据选择模型
 
 6. 可视化还处于演示版。
@@ -75,8 +73,7 @@
    目前只有聚合均值，没有“版本对版本”的差异分析引擎，也没有阈值过滤。
 
 8. 重复实验和统计显著性尚未形成闭环。
-   当前数据模型已经保留了 `run_label`，但系统还没有：
-   - 同一配置自动重复执行
+   当前配置模型已支持 `repeat_count` 展开多个 run label，但系统还没有：
    - 汇总均值/标准差/置信区间
    - t-test 或其他显著性分析
 
@@ -101,8 +98,8 @@
 - 引入数据与配置的 provenance 追踪：确保一份报告能回溯到输入配置和源码版本。
 - 将“原始结果解析”和“分析视图模型”分层，避免后续复杂分析都直接耦合在 CSV 上。
 - 为 Snakemake 提供 profile、cluster/HPC 运行说明和资源声明。
-- 增加“仅重跑失败版本/失败 suite”的目标规则。
-- 增加“从历史 run 重建派生产物”的规则，例如只凭已有 `results/` 重新生成 parsed/aggregated/report。
+- 继续明确“仅重跑失败版本/失败 suite”的推荐 Snakemake target 用法。
+- 增强从历史 experiment/run 重建派生产物的选择模型，例如按 metadata 条件选择 parsed/aggregated/report 输入。
 - 增加数据清洗规则，自动识别异常值、空结果、编译失败和运行崩溃。
 - 持续整理 `workflow/lib/` 的模块边界，避免 `common.py` 再次变成混合配置、路径、构建和 suite 细节的工具箱。
 
@@ -132,7 +129,7 @@
 - `pp_report.pdf` 中的 work plan 顺序
 - 当前代码差距
 - 研究项目最怕返工的部分
-- 现在所处时间点（`2026-05-11`，接近报告中的 Task 1.4）
+- 现在所处时间点（`2026-05-18`，阶段 2 已完成，准备进入阶段 3）
 
 ---
 
@@ -142,23 +139,27 @@
 
 在继续扩展功能前，把当前 Snakemake 版本固化为一个清晰、可测试、可回归的基线，避免后面一边改架构一边失去参考点。
 
-### 需要完成的功能
+### 当前状态
+
+阶段 0 已基本完成。当前文档和配置已经能支持单版本/单实验的基本运行、dry-run 检查、目录布局理解和恢复入口说明。后续如果修改 README 或 docs，应以当前 simple/explicit 配置结构和 `experiment_id` 目录布局为准，不再回到阶段一早期的旧描述。
+
+### 已完成的功能
 
 - 补充当前架构说明文档。
 - 固化一套最小演示配置和样例输出。
 - 标记当前系统已知限制。
 - 把“能成功跑通的配置”与“仅设想支持但未真正实现的能力”区分清楚。
 
-### 需要修改/新增的代码或文件
+### 已修改/新增的代码或文件
 
 - `README.md`
-  - 增补当前限制说明：只使用 `tags[0]`、暂无 test subset、暂无多轮统计、暂无自动监控。
+  - 增补当前限制说明：暂无 test subset、暂无统计显著性分析、暂无自动监控。
 - 新增 `docs/` 或扩展根目录文档
   - 增加运行样例、目录布局说明、日志定位说明。
 - `config.yml`
   - 增加注释模板，说明哪些字段已支持、哪些字段是计划支持。
 
-### 具体修改内容
+### 已完成的具体修改
 
 - 把当前 `workflow` 的输入、输出、日志路径写成稳定文档。
 - 记录 `auto/` 中已跑通样例的参数组合作为回归基线。
@@ -167,7 +168,7 @@
 ### 验收标准
 
 - 新成员只看文档即可跑通一次单版本流程。
-- 文档中不会误导读者以为“多 tag 列表已经真正支持矩阵运行”。
+- 文档中不会继续使用阶段一早期的旧路径或旧配置写法误导读者。
 
 ---
 
@@ -177,31 +178,25 @@
 
 把“配置层支持多个版本”从名义支持变成真实支持，为后续大规模采集和跨版本比较打基础。
 
-### 当前差距
+### 当前状态
 
-- `workflow/Snakefile` 直接取：
-  - `llvm.tags[0]`
-  - `official.tags[0]`
-  - `raja.tags[0]`
-- 系统无法一次性声明多个 LLVM 版本并自动展开。
-- 还不支持“一个 LLVM 版本对应多个 suite 版本”或“重复运行列表”。
+阶段 1 已完成。当前系统已经支持 simple matrix mode 和 explicit experiment mode，不再只取 `tags[0]`。`Snakefile` 会基于归一化后的 `experiments` 列表生成最终报告目标，并使用 `experiment_id` 管理每个实验的 parsed/report/metadata 输出。
 
-### 需要完成的功能
+### 已完成的功能
 
 - 真正支持多版本矩阵展开。
 - 支持显式定义实验组合。
 - 支持多次重复运行。
 - 为每个组合生成独立目录和独立结果。
 
-### 需要修改/新增的代码或文件
+### 已修改/新增的代码或文件
 
 - `workflow/Snakefile`
 - `workflow/lib/common.py`
 - 可能新增：
-  - `workflow/lib/experiment_matrix.py`
-  - `workflow/lib/config_schema.py`
+  - 当前实现暂未单独拆出 `experiment_matrix.py` / `config_schema.py`，实验归一化仍在 `common.py` 中。
 
-### 具体修改内容
+### 已完成的具体修改
 
 1. 扩展配置结构，建议支持两种模式：
    - 简单模式：
@@ -230,13 +225,13 @@
 5. 设计重复实验接口：
    - 允许同一实验自动生成 `repeat_01`、`repeat_02`、`repeat_03`。
 
-### 建议新增配置字段
+### 已引入的配置字段
 
 - `runs.labels`
 - `runs.repeat_count`
 - `project.default_platform`
 - `experiments[]`
-- `build_profiles[]`
+- `build_profile` 字段已预留在 experiment 元数据中，但尚未形成实际构建参数模型。
 
 ### 验收标准
 
@@ -256,15 +251,11 @@
 
 换句话说，阶段 2 不应尝试替代 Snakemake 的 job 状态管理，而应把“实验配置、输出路径、日志位置、失败诊断和派生产物重建”整理成更清晰、更可复现的工作流产物。
 
-### 当前差距
+### 当前状态
 
-- 当前失败后主要依赖 Snakemake 默认报错和分散的 rule 日志。
-- `parsed/`、`reports/` 已按 `experiment_id` 隔离，但每个实验缺少一份轻量的配置快照和 provenance 文件。
-- 失败诊断仍然需要人工在多个日志目录之间跳转。
-- “从已有原始结果重建 parsed / aggregated / report”在 DAG 层已经接近可行，但文档和目标入口还不够明确。
-- 原阶段 2 设想的全局 manifest、每个 rule 主动更新状态、retry CLI 等功能容易和 Snakemake 自身的 DAG 与状态机制重复，增加维护成本和入口复杂度。
+阶段 2 已完成。当前系统已经生成 experiment metadata，`generate_report` 依赖 metadata，`run.sh` 提供 `resume`、`strict`、`inspect` 等轻量入口，恢复方式保持 Snakemake-first，没有引入新的调度器或全局 mutable manifest。
 
-### 需要完成的功能
+### 已完成的功能
 
 - 为每个 experiment 生成轻量元数据文件，记录配置、路径和环境摘要。
 - 改善 rule 级日志和错误信息，使失败原因可以从对应日志中快速定位。
@@ -274,9 +265,9 @@
   - 使用具体 target 只重建某个 experiment 的 parsed / aggregated / report。
   - 使用 `--forcerun` 或删除特定输出触发某个 rule 重跑。
 - 增加轻量的状态/诊断辅助命令，只负责“读取现有文件并汇总”，不负责调度或修改状态。
-- 把历史 run 恢复设计为普通 Snakemake target，而不是单独的恢复系统。
+- 把历史 experiment/run 恢复设计为普通 Snakemake target，而不是单独的恢复系统。
 
-### 需要修改/新增的代码或文件
+### 已修改/新增的代码或文件
 
 - `workflow/Snakefile`
 - `workflow/lib/common.py`
@@ -335,68 +326,100 @@
 
 ---
 
-## 阶段 3：构建缓存、清理策略与资源管理
+## 阶段 3：构建缓存与资源可观测性
 
 ### 目标
 
-解决当前构建复用和资源控制上的隐患，支撑后续大规模版本采集。
+解决当前构建缓存复用不足、构建配置边界不清、磁盘占用不透明的问题，为后续大规模版本采集打基础。
+
+本阶段继续坚持 Snakemake-first 原则：缓存复用和资源控制应尽量通过现有 DAG、配置字段和 Snakemake resources 实现；磁盘和产物检查可以通过只读 helper 命令辅助完成；清理操作必须显式、保守，不在 DAG 中自动删除关键产物。
 
 ### 当前差距
 
 - `build_with_cmake()` 默认 `clear_first=True`，会削弱缓存价值。
-- 还缺少显式清理策略。
-- 没有磁盘占用摘要。
-- 没有对并发、内存、磁盘阈值的配置控制。
+- LLVM、Official、RAJA 的 CMake 参数生成函数仍在 `common.py` 中，`common.py` 又开始承担 suite-specific 构建细节。
+- 目前能通过 Snakemake `-j` 控制总体并发，也已经让 benchmark run 独占线程，但还没有单独控制“同时最多几个构建任务”的资源模型。
+- 没有 build/install/results/parsed/reports 的磁盘占用摘要。
+- 清理策略尚未文档化；如果未来提供清理工具，需要避免误删结果或绕过 Snakemake 的输出状态。
 
 ### 需要完成的功能
 
 - 默认保留 build 缓存。
-- 允许按规则执行清理，而不是每次 build 清空目录。
-- 提供空间控制和资源保护。
+- 允许用户通过配置显式请求 clean build，而不是每次 build 自动清空目录。
+- 将 suite-specific CMake 参数生成逻辑从 `common.py` 拆出。
+- 使用 Snakemake resources 控制构建任务并发。
+- 提供只读磁盘占用报告，帮助用户判断是否需要人工清理。
+- 文档化安全清理边界：默认不自动删除源码、install、原始结果或报告。
 
 ### 需要修改/新增的代码或文件
 
 - `workflow/lib/common.py`
 - `workflow/lib/cmake_build.py`
 - `workflow/Snakefile`
+- `config.yml`
+- `run.sh`
 - 新增：
-  - `workflow/lib/build_configs.py` 或 `workflow/lib/cmake_args.py`
-  - `workflow/scripts/cleanup_cli.py`
-  - `workflow/scripts/disk_usage_report_cli.py`
+  - `workflow/lib/build_configs.py`
+  - `tools/report_disk_usage.py`
+  - 可选：`docs/storage.md` 或在现有恢复文档中增加磁盘与缓存说明
 
 ### 具体修改内容
 
 1. 修改 `build_with_cmake()`：
    - 默认不清空构建目录。
-   - 仅在配置显式要求 `reconfigure: true` 或 `clean_build: true` 时清理。
+   - 增加 `clean_first` / `clean_build` 参数，并只在配置显式开启时调用 `clear_directory()`。
+   - 保持每次运行 CMake configure，因为重新 configure 不等于清空缓存；这样既能吸收 CMake 参数变化，又能保留 Ninja 增量构建能力。
 
-2. 增加清理类 rule：
-   - 清理临时 build
-   - 清理旧 install
-   - 清理指定 run_label 的结果和日志
-   - 保留结果、删除中间产物
+2. 增加构建配置字段：
+   - `build.clean_build`
+   - `build.reconfigure`
+   - `resources.build_slots`
+   - `resources.benchmark_slots` 可选；如果继续使用 `threads` 独占 benchmark，可先不引入。
 
-3. 增加资源配置：
-   - `resources.max_parallel_builds`
-   - `resources.disk_soft_limit_gb`
-   - `resources.require_clean_before_build`
+3. 在 `Snakefile` 中接入 Snakemake resources：
+   - build 相关 rule 设置 `resources: build_slots=1`。
+   - `run.sh` 可以传递默认 `--resources build_slots=1`，避免多个大型 build 同时竞争 CPU、内存和磁盘 IO。
+   - 仍保留 `-j` 控制全局 job 并发，不另写调度逻辑。
 
-4. 输出资源摘要：
-   - 单个 LLVM install 占用
-   - 单个 build 占用
-   - 当前 results/parsed/reports 占用
-
-5. 继续整理构建相关模块边界：
+4. 拆分构建参数模块：
    - `workflow/lib/cmake_build.py` 保持只负责通用 CMake/Ninja 执行流程。
-   - 将 LLVM、Official、RAJA 的 CMake 参数生成函数从 `common.py` 移入 `build_configs.py` 或 `cmake_args.py`。
-   - 将 RAJA OpenMP 探测逻辑与 suite-specific CMake 参数放在同一构建配置模块中，避免 `common.py` 承担 suite 细节。
-   - 如果 build profile 进入配置模型，优先让配置归一化层只产生 profile 名称和参数覆盖，具体 CMake 参数仍由构建配置模块解释。
+   - 将 LLVM、Official、RAJA 的 CMake 参数生成函数从 `common.py` 移入 `workflow/lib/build_configs.py`。
+   - 将 RAJA OpenMP 探测逻辑与 RAJA CMake 参数放在同一模块中，避免 `common.py` 承担 suite 细节。
+   - 如果 build profile 后续进入配置模型，配置归一化层只保留 profile 名称和参数覆盖；具体 CMake 参数仍由构建配置模块解释。
+
+5. 增加只读磁盘占用报告：
+   - 提供 `tools/report_disk_usage.py` 或类似命令。
+   - 通过 `./run.sh disk` 调用。
+   - 输出以下目录占用：
+     - `sources/`
+     - `builds/`
+     - `installs/`
+     - `results/`
+     - `parsed/`
+     - `reports/`
+     - `metadata/`
+     - `logs/`
+   - 报告单个 LLVM install、单个 suite build、单个 experiment 结果的占用，方便判断主要空间消耗来自哪里。
+
+6. 暂缓自动清理工具：
+   - 阶段 3 不新增会主动删除产物的 Snakemake rule。
+   - 如确实需要清理脚本，应放在 `tools/`，默认 `--dry-run`，必须显式传入 `--execute` 才删除。
+   - 清理脚本不作为默认入口，不隐藏 Snakemake incomplete/metadata 状态。
 
 ### 验收标准
 
-- 二次运行相同版本时不会无意义全量重编。
-- 清理行为是显式且可控的。
+- 二次运行相同版本时不会因为 build 目录被自动清空而无意义全量重编。
+- 用户可以通过配置显式选择 clean build。
+- 构建相关 CMake 参数不再放在 `common.py` 中。
+- Snakemake 可以限制同时运行的 build job 数量。
 - 系统能给出清晰的磁盘占用报告。
+- 阶段 3 不引入自动删除关键产物的 DAG rule。
+
+### 暂不纳入本阶段的内容
+
+- 不做自动磁盘阈值阻断，例如 `disk_soft_limit_gb`。这类功能涉及检查时机、文件系统选择和并发写入后的空间变化，后续确有需求再加入 preflight。
+- 不做“清理旧 install / 清理旧结果 / 清理旧日志”的自动策略。清理是破坏性操作，应等缓存布局、build profile 和正式数据归档规则稳定后再设计。
+- 不在 Snakemake 之外实现资源调度器，避免重复 Snakemake 已有能力。
 
 ---
 
@@ -559,7 +582,7 @@
 - 没有版本间差异计算。
 - 没有基准版本概念。
 - 没有阈值过滤和回归榜单。
-- 历史 run 还不能方便地作为对比输入集合被显式选择和复用。
+- 历史 experiment/run 还不能方便地作为对比输入集合被显式选择和复用。
 
 ### 需要完成的功能
 
@@ -567,7 +590,7 @@
 - 自动检测改善和回归。
 - 支持用户设定显著变化阈值。
 - 生成可直接写入论文分析部分的数据表。
-- 支持从多个历史 run 选择输入数据，而不是只依赖当前一次执行的输出。
+- 支持从多个历史 experiment/run 选择输入数据，而不是只依赖当前一次执行的输出。
 
 ### 需要修改/新增的代码或文件
 
@@ -610,14 +633,14 @@
    - 波动最大测试
 
 6. 扩展输入模型：
-   - 支持按 `run_label` 列表读取多个历史 parsed 文件
+   - 支持按 `experiment_id`、`run_label` 或 metadata 条件读取多个历史 parsed 文件
    - 或从 `results/` 中按条件重建比较输入
    - 明确区分“单次实验报告输入”和“跨 run 比较输入”
 
 ### 验收标准
 
 - 用户能指定基准 LLVM 版本并自动生成回归列表。
-- 用户能从已有历史 run 中选择比较对象，而不需要重新执行 benchmark。
+- 用户能从已有历史 experiment/run 中选择比较对象，而不需要重新执行 benchmark。
 - 结果表可以直接支撑论文中“性能变化分析”章节。
 
 ---
@@ -633,14 +656,14 @@
 - 目前图表固定，只有两个子图。
 - 缺少筛选、搜索、对比和失败项展示。
 - 尚未突出多版本、多轮次、变化阈值分析的价值。
-- 报告入口仍主要围绕当前 run 输出，缺少“对历史 run 重新出报告”的显式工作流。
+- 报告入口仍主要围绕单个 experiment 输出，缺少“对多个历史 experiment 生成组合报告”的显式工作流。
 
 ### 需要完成的功能
 
 - 改进静态 HTML 报告。
 - 增加交互过滤和多视图展示。
 - 如果时间允许，再追加轻量 Web App。
-- 支持历史 run 的报告重生成与历史 run 对比报告。
+- 支持历史 experiment 的报告重生成与历史 experiment 对比报告。
 
 ### 需要修改/新增的代码或文件
 
@@ -683,18 +706,18 @@
    - 页面聚焦结果筛选与对比，不做复杂后端。
 
 6. 增加历史报告工作流：
-   - 允许用户指定一个已有 `run_label` 直接重建 HTML 报告
+   - 允许用户指定一个已有 `experiment_id` 直接重建 HTML 报告
    - 将聚合分析逻辑与 Plotly 视图生成解耦，避免 `reporting.py` 同时承担 table IO、统计聚合和可视化布局。
    - 当差异分析和统计显著性加入后，优先把分析函数放入 `analysis.py`，报告模块只负责把分析结果渲染出来。
-   - 允许用户选择多个历史 run 生成对比报告
-   - 在报告首页展示数据来源 run、生成时间和输入文件摘要
+   - 允许用户选择多个历史 experiment/run 生成对比报告
+   - 在报告首页展示数据来源 experiment/run、生成时间和输入文件摘要
 
 ### 验收标准
 
 - 静态报告不再局限于两个固定图。
 - 用户能在报告中快速定位某个 kernel 或某类 benchmark。
 - 回归和改善项在界面上可直接识别。
-- 历史 run 的报告可以在不重跑 benchmark 的前提下重新生成。
+- 历史 experiment 的报告可以在不重跑 benchmark 的前提下重新生成。
 
 ---
 
@@ -702,27 +725,26 @@
 
 ### 目标
 
-把 `run_label` 从“保留多次结果”推进到“支持统计结论”，覆盖 Future Work 中的 repeated runs 和 significance testing。
+把当前的 `repeat_count` / `run_label` 机制从“能生成多次运行”推进到“能支持统计结论”，覆盖 Future Work 中的 repeated runs 和 significance testing。
 
 ### 当前差距
 
-- 已保留 run_label，但没有自动重复执行 orchestration。
+- 已支持通过 `repeat_count` 展开多个 run label，但聚合和报告还没有把这些重复运行组织成统计分析单元。
 - 聚合只有 `mean/std/count`，且没有显著性判断。
 - 缺少环境稳定性记录，不利于解释噪声。
 
 ### 需要完成的功能
 
-- 自动重复运行指定实验若干次。
+- 将重复运行结果组织成可分析的统计样本。
 - 聚合时加入统计检验。
 - 为论文分析输出更稳健的结论。
 
 ### 需要修改/新增的代码或文件
 
-- `workflow/Snakefile`
 - `workflow/lib/reporting.py`
 - 新增：
   - `workflow/lib/statistics.py`
-  - `workflow/scripts/run_batch_cli.py`
+  - `workflow/scripts/compare_repeats_cli.py`
 
 ### 具体修改内容
 
@@ -752,7 +774,7 @@
 
 ### 验收标准
 
-- 同一版本可自动跑多轮，不需要手动改 `run_label`。
+- 同一版本的多轮结果可被自动识别为同一个统计样本组。
 - 报告和分析结果能区分“真实变化”和“噪声波动”。
 
 ---
@@ -976,26 +998,24 @@
 
 ## 6. 推荐的近期优先级
 
-按当前代码和时间节点，建议优先顺序如下：
+按当前代码和时间节点，阶段 0、阶段 1、阶段 2 已作为基线完成。后续建议优先顺序如下：
 
-1. 阶段 1：配置模型升级与多版本矩阵执行
-2. 阶段 2：Snakemake 内聚的可观测性、恢复与实验元数据
-3. 阶段 4：数据解析层重构与多格式适配
-4. 阶段 5：测试子集选择与运行参数控制
-5. 阶段 3：构建缓存、清理策略与资源管理
-6. 历史运行数据重解析 / 重聚合 / 重出报告能力
-7. 阶段 6：差异分析与自动回归检测
-8. 阶段 7：报告系统升级
-9. 阶段 8：重复实验与统计显著性
-10. 阶段 9：平台抽象与 HPC 支持
-11. 阶段 10：自动版本监控
-12. 阶段 11：自定义 suite 扩展
-13. 阶段 12：工程质量与最终交付
+1. 阶段 3：构建缓存与资源可观测性
+2. 阶段 4：数据解析层重构与多格式适配
+3. 阶段 5：测试子集选择与运行参数控制
+4. 历史运行数据重解析 / 重聚合 / 重出报告能力
+5. 阶段 6：差异分析与自动回归检测
+6. 阶段 7：报告系统升级
+7. 阶段 8：重复实验与统计显著性
+8. 阶段 9：平台抽象与 HPC 支持
+9. 阶段 10：自动版本监控
+10. 阶段 11：自定义 suite 扩展
+11. 阶段 12：工程质量与最终交付
 
 这样排序的原因是：
 
-- 如果不先解决矩阵执行、Snakemake 内聚的恢复体验、解析兼容和测试子集，后面的大规模数据采集会很痛苦。
-- 如果不能稳定复用历史 run，后续调报告、补 parser、做比较分析时会被迫重复运行 benchmark，成本过高。
+- 阶段 3 先解决构建缓存和磁盘可见性，可以减少后续解析、测试子集和多版本采集时的无谓重编成本。
+- 如果不能稳定复用历史 experiment/run，后续调报告、补 parser、做比较分析时会被迫重复运行 benchmark，成本过高。
 - 报告增强和统计分析要建立在稳定的数据层之上。
 - 自动监控和新 suite 扩展对毕业项目是加分项，但不是当前最急的堵点。
 
@@ -1008,7 +1028,7 @@
 - 已支持多 LLVM 版本矩阵运行
 - 已支持清晰失败诊断、产物摘要与 Snakemake target 级补跑
 - 已支持 test subset
-- 已支持从历史 run 重建 parsed / aggregated / report
+- 已支持从历史 experiment/run 重建 parsed / aggregated / report
 - parser 对当前目标版本稳定
 
 ### 里程碑 B：可用于正式数据采集
@@ -1023,7 +1043,7 @@
 - 已具备版本比较与回归检测
 - 已具备改进后的交互式报告
 - 已具备显著性分析
-- 已能复用历史 run 生成比较输入与对比报告
+- 已能复用历史 experiment/run 生成比较输入与对比报告
 - 已能产出关键图表和结论表
 
 ### 里程碑 D：可作为完整项目交付
