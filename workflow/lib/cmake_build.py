@@ -33,16 +33,24 @@ def build_with_cmake(
     run_cmd: RunCommand,
     status_callback: StatusCallback | None = None,
     install: bool = False,
-    clear_first: bool = True,
+    clean_build: bool = False,
+    reconfigure: bool = True,
 ) -> bool:
-    if clear_first:
+    if clean_build:
+        if status_callback:
+            status_callback(f"Cleaning build directory before configure: {build_dir}")
         clear_directory(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    if status_callback:
-        status_callback("Configuring with CMake...")
-    if not run_cmd(["cmake", "-G", "Ninja"] + cmake_args, build_dir, None):
-        return False
+    cmake_cache = build_dir / "CMakeCache.txt"
+    should_configure = reconfigure or not cmake_cache.exists()
+    if should_configure:
+        if status_callback:
+            status_callback("Configuring with CMake...")
+        if not run_cmd(["cmake", "-G", "Ninja"] + cmake_args, build_dir, None):
+            return False
+    elif status_callback:
+        status_callback(f"Skipping CMake configure because {cmake_cache} already exists.")
 
     if status_callback:
         status_callback("Compiling...")

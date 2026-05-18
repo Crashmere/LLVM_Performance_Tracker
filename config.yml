@@ -5,6 +5,8 @@ project:
 
 build:
   ninja_jobs: 6
+  clean_build: false
+  reconfigure: true
 
 repositories:
   llvm: "https://github.com/llvm/llvm-project.git"

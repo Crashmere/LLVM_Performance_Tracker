@@ -10,8 +10,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from workflow.lib.command_runner import CommandRunner
+from workflow.lib.build_configs import get_llvm_cmake_args
 from workflow.lib.cmake_build import build_with_cmake, normalize_ninja_jobs
-from workflow.lib.common import get_llvm_cmake_args
 
 
 runner = CommandRunner.from_snakemake(snakemake)
@@ -39,6 +39,8 @@ success = build_with_cmake(
     run_cmd=runner.run,
     status_callback=runner.log,
     install=True,
+    clean_build=bool(snakemake.params.clean_build),
+    reconfigure=bool(snakemake.params.reconfigure),
 )
 
 if not success:

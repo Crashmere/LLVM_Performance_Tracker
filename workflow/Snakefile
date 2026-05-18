@@ -105,6 +105,8 @@ rule build_llvm:
         host_c_compiler=WORKFLOW_CONFIG["llvm"]["build"]["c_compiler"],
         host_cxx_compiler=WORKFLOW_CONFIG["llvm"]["build"]["cxx_compiler"],
         ninja_jobs=WORKFLOW_CONFIG["build"]["ninja_jobs"],
+        clean_build=WORKFLOW_CONFIG["build"]["clean_build"],
+        reconfigure=WORKFLOW_CONFIG["build"]["reconfigure"],
     script:
         "scripts/build_llvm.py"
 
@@ -129,6 +131,8 @@ rule build_official:
         llvm_install_dir=lambda wildcards: str(BASE_DIR / "installs" / "llvm" / wildcards.llvm_tag),
         cxx_standard=WORKFLOW_CONFIG["test_suite"]["official"]["cxx_standard"],
         ninja_jobs=WORKFLOW_CONFIG["build"]["ninja_jobs"],
+        clean_build=WORKFLOW_CONFIG["build"]["clean_build"],
+        reconfigure=WORKFLOW_CONFIG["build"]["reconfigure"],
     script:
         "scripts/build_official.py"
 
@@ -149,6 +153,8 @@ rule build_raja:
         llvm_install_dir=lambda wildcards: str(BASE_DIR / "installs" / "llvm" / wildcards.llvm_tag),
         cxx_standard=WORKFLOW_CONFIG["test_suite"]["raja"]["cxx_standard"],
         ninja_jobs=WORKFLOW_CONFIG["build"]["ninja_jobs"],
+        clean_build=WORKFLOW_CONFIG["build"]["clean_build"],
+        reconfigure=WORKFLOW_CONFIG["build"]["reconfigure"],
     script:
         "scripts/build_raja.py"
 

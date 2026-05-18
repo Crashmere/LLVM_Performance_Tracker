@@ -31,6 +31,7 @@ Usage:
   ./run.sh resume                  Continue after an interrupted run.
   ./run.sh strict [command|args...] Run without --keep-going.
   ./run.sh inspect [args...]       Inspect existing outputs without changing state.
+  ./run.sh disk [args...]          Show disk usage under the workflow base directory.
   ./run.sh -- <args...>            Pass extra arguments through to snakemake.
 
 Defaults:
@@ -66,6 +67,15 @@ case "${1-}" in
       exit 1
     fi
     exec "$PYTHON_BIN" "$ROOT_DIR/tools/inspect_workflow_outputs.py" --base-dir "$ROOT_DIR/auto" "$@"
+    ;;
+  disk)
+    shift
+    if [[ ! -x "$PYTHON_BIN" ]]; then
+      echo "Missing python executable at $PYTHON_BIN" >&2
+      echo "Create the virtual environment and install dependencies first." >&2
+      exit 1
+    fi
+    exec "$PYTHON_BIN" "$ROOT_DIR/tools/report_disk_usage.py" --config-file "$ROOT_DIR/config.yml" "$@"
     ;;
   --)
     shift
