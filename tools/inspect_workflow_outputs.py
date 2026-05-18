@@ -15,6 +15,7 @@ SUMMARY_FIELDS = [
     "official_tag",
     "raja_tag",
     "metadata",
+    "shared_deps",
     "raw_results",
     "parsed",
     "aggregated",
@@ -59,6 +60,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
                     "official_tag": "",
                     "raja_tag": "",
                     "metadata": "invalid",
+                    "shared_deps": "missing",
                     "raw_results": "missing",
                     "parsed": "missing",
                     "aggregated": "missing",
@@ -70,6 +72,9 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
 
         experiment = metadata.get("experiment", {})
         outputs = metadata.get("expected_outputs", {})
+        paths = metadata.get("paths", {})
+        shared_status = get_shared_dependency_status(outputs, paths)
+        shared_ok = all(shared_status.values())
         official_ok = exists(outputs.get("official_results"))
         raja_ok = exists(outputs.get("raja_results"))
         parsed_ok = exists(outputs.get("parsed_csv"))
@@ -84,23 +89,54 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
                 "official_tag": experiment.get("official_tag", ""),
                 "raja_tag": experiment.get("raja_tag", ""),
                 "metadata": "present",
+                "shared_deps": "present" if shared_ok else "missing",
                 "raw_results": "present" if official_ok and raja_ok else "missing",
                 "parsed": "present" if parsed_ok else "missing",
                 "aggregated": "present" if aggregated_ok else "missing",
                 "report": "present" if report_ok else "missing",
-                "next_step": suggest_next_step(official_ok, raja_ok, parsed_ok, aggregated_ok, report_ok),
+                "next_step": suggest_next_step(
+                    shared_status,
+                    official_ok,
+                    raja_ok,
+                    parsed_ok,
+                    aggregated_ok,
+                    report_ok,
+                ),
             }
         )
     return records
 
 
+def get_shared_dependency_status(outputs: dict[str, Any], paths: dict[str, Any]) -> dict[str, bool]:
+    expected_paths = {
+        "llvm checkout": outputs.get("llvm_checkout_stamp") or _join_path(paths.get("llvm_source"), ".checkout_complete"),
+        "official checkout": outputs.get("official_checkout_stamp")
+        or _join_path(paths.get("official_source"), ".checkout_complete"),
+        "RAJA checkout": outputs.get("raja_checkout_stamp") or _join_path(paths.get("raja_source"), ".checkout_complete"),
+        "LLVM build": outputs.get("llvm_build_stamp") or _join_path(paths.get("llvm_build"), ".build_complete"),
+        "official build": outputs.get("official_build_stamp") or _join_path(paths.get("official_build"), ".build_complete"),
+        "RAJA build": outputs.get("raja_build_stamp") or _join_path(paths.get("raja_build"), ".build_complete"),
+    }
+    return {name: exists(path) for name, path in expected_paths.items()}
+
+
+def _join_path(parent: str | None, child: str) -> str | None:
+    if not parent:
+        return None
+    return str(Path(parent) / child)
+
+
 def suggest_next_step(
+    shared_status: dict[str, bool],
     official_ok: bool,
     raja_ok: bool,
     parsed_ok: bool,
     aggregated_ok: bool,
     report_ok: bool,
 ) -> str:
+    missing_shared = [name for name, ok in shared_status.items() if not ok]
+    if missing_shared:
+        return "rebuild shared dependency; missing " + " and ".join(missing_shared)
     if not official_ok or not raja_ok:
         missing = []
         if not official_ok:

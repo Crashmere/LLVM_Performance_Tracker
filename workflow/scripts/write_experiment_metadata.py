@@ -81,6 +81,12 @@ def build_metadata(
         },
         "paths": _path_map_to_strings(layout),
         "expected_outputs": {
+            "llvm_checkout_stamp": str(layout["llvm_source"] / ".checkout_complete"),
+            "official_checkout_stamp": str(layout["official_source"] / ".checkout_complete"),
+            "raja_checkout_stamp": str(layout["raja_source"] / ".checkout_complete"),
+            "llvm_build_stamp": str(layout["llvm_build"] / ".build_complete"),
+            "official_build_stamp": str(layout["official_build"] / ".build_complete"),
+            "raja_build_stamp": str(layout["raja_build"] / ".build_complete"),
             "official_results": str(layout["official_result"] / "baseline_results.json"),
             "raja_results": str(layout["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
             "parsed_csv": str(layout["parsed_run_dir"] / "benchmark_records.csv"),
@@ -111,6 +117,58 @@ def build_metadata(
                 / str(experiment["llvm_tag"])
                 / str(experiment["run_label"])
                 / "run_raja.log"
+            ),
+        },
+        "shared_logs": {
+            "checkout_llvm": str(
+                base_dir
+                / "logs"
+                / "_shared"
+                / "checkout_llvm"
+                / str(experiment["llvm_tag"])
+                / "checkout_llvm.log"
+            ),
+            "checkout_official": str(
+                base_dir
+                / "logs"
+                / "_shared"
+                / "checkout_official"
+                / str(experiment["official_tag"])
+                / "checkout_official.log"
+            ),
+            "checkout_raja": str(
+                base_dir
+                / "logs"
+                / "_shared"
+                / "checkout_raja"
+                / str(experiment["raja_tag"])
+                / "checkout_raja.log"
+            ),
+            "build_llvm": str(
+                base_dir
+                / "logs"
+                / "_shared"
+                / "build_llvm"
+                / str(experiment["llvm_tag"])
+                / "build_llvm.log"
+            ),
+            "build_official": str(
+                base_dir
+                / "logs"
+                / "_shared"
+                / "build_official"
+                / str(experiment["official_tag"])
+                / f"llvm-{experiment['llvm_tag']}"
+                / "build_official.log"
+            ),
+            "build_raja": str(
+                base_dir
+                / "logs"
+                / "_shared"
+                / "build_raja"
+                / str(experiment["raja_tag"])
+                / f"llvm-{experiment['llvm_tag']}"
+                / "build_raja.log"
             ),
         },
         "environment": collect_environment(),
