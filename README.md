@@ -461,3 +461,158 @@ Introduce experiment metadata outputs, a read-only output inspection tool, recov
 - I simplified repeated command logging code by introducing a shared `CommandRunner`, then updated the checkout, build, and benchmark run scripts to use it.
 - I split path layout and generic CMake/Ninja execution helpers out of `common.py`, which makes the library structure easier to extend in later stages.
 - I also reorganized `config.yml` into shared settings plus simple and explicit mode sections, including numeric Ninja jobs and per-suite C++ standard defaults.
+
+### 阶段三：构建缓存、磁盘可观测性与失败诊断增强
+
+这一阶段的目标，是让已有构建产物更好地复用，避免每次执行 build rule 都清空 CMake/Ninja build 目录。同时补充只读磁盘占用检查工具，并改进阶段二的 inspect 诊断能力，让失败时更容易判断问题发生在 shared checkout/build 阶段，还是 run/parse/report 阶段。
+
+阶段三继续保持 Snakemake-first 的设计：不引入新的调度器，不做自动清理 rule，也不新增额外的 build slot 配置。整体并发仍然由 Snakemake `-j` 控制，单个 Ninja build 的内部并行度由 `build.ninja_jobs` 控制。
+
+#### 主要设计决策
+
+- 默认保留 build 目录，不再在每次 build 前自动清空。
+- clean build 必须由配置显式开启，避免无意触发全量重编。
+- CMake configure 和 clean build 分开控制：
+  - `clean_build` 决定是否删除已有 build 目录内容。
+  - `reconfigure` 决定是否重新运行 CMake configure。
+- 不使用额外的 `build_slots` 配置；构建并发保持由 Snakemake `-j` 控制。
+- 磁盘占用工具只读，不删除文件、不修改 Snakemake metadata。
+- shared checkout/build 日志可以被多个 experiment 复用，因此只作为 shared log path 记录，不视为 experiment 私有日志快照。
+
+#### 具体修改
+
+- `workflow/lib/cmake_build.py`
+  - `build_with_cmake()` 默认不再清空 build 目录。
+  - 新增 `clean_build` 参数，只有为 `true` 时才调用 `clear_directory()`。
+  - 新增 `reconfigure` 参数：
+    - `true`：每次 build rule 执行时重新运行 CMake configure。
+    - `false`：如果已有 `CMakeCache.txt`，跳过 configure，直接运行 Ninja。
+  - 保留 CMake configure 与 Ninja build 的通用流程，继续不耦合 suite-specific 参数。
+
+- `workflow/lib/build_configs.py`
+  - 新增构建参数模块。
+  - 从 `common.py` 中迁出：
+    - `get_llvm_cmake_args()`
+    - `get_official_cmake_args()`
+    - `get_raja_cmake_args()`
+    - `find_omp_library()`
+    - `get_actual_clang_major_version()`
+  - RAJA OpenMP 探测和 RAJA CMake 参数现在放在同一模块中，避免 `common.py` 继续承载 suite-specific 构建细节。
+
+- `workflow/scripts/build_llvm.py`
+  - 改为从 `workflow.lib.build_configs` 导入 LLVM CMake 参数生成函数。
+  - 从 Snakemake params 接收 `clean_build` 和 `reconfigure`，并传给 `build_with_cmake()`。
+
+- `workflow/scripts/build_official.py`
+  - 改为从 `workflow.lib.build_configs` 导入 Official CMake 参数生成函数。
+  - 接入 `clean_build` 和 `reconfigure`。
+
+- `workflow/scripts/build_raja.py`
+  - 改为从 `workflow.lib.build_configs` 导入 RAJA CMake 参数生成函数。
+  - 接入 `clean_build` 和 `reconfigure`。
+
+- `workflow/Snakefile`
+  - build rule 的 params 中新增：
+    - `clean_build=WORKFLOW_CONFIG["build"]["clean_build"]`
+    - `reconfigure=WORKFLOW_CONFIG["build"]["reconfigure"]`
+  - 没有引入 `resources.build_slots`；构建任务并发仍由 Snakemake `-j` 控制。
+
+- `config.yml`
+  - `build` 配置扩展为：
+    - `ninja_jobs: 6`
+    - `clean_build: false`
+    - `reconfigure: true`
+  - `clean_build: false` 是默认推荐设置。
+  - `reconfigure: true` 让 CMake 参数、编译器路径、安装路径等变化能被重新检查，同时仍保留 Ninja 增量构建缓存。
+
+- `tools/report_disk_usage.py`
+  - 新增只读磁盘占用检查工具。
+  - 扫描 workflow base directory 下的：
+    - `sources/`
+    - `builds/`
+    - `installs/`
+    - `results/`
+    - `parsed/`
+    - `reports/`
+    - `metadata/`
+    - `logs/`
+  - 支持 `--top` 控制每类目录展示多少个最大子项。
+
+- `run.sh`
+  - 新增 `disk` 子命令：
+    - `./run.sh disk`
+    - `./run.sh disk --top 5`
+  - 该命令调用 `tools/report_disk_usage.py`。
+  - `run.sh` 没有新增自动清理入口。
+
+- `docs/storage.md`
+  - 新增英文用户说明文档。
+  - 只说明如何使用 build cache 配置和 `./run.sh disk`。
+  - 不写开发记录，不面向开发者描述阶段历史。
+
+- `workflow/scripts/write_experiment_metadata.py`
+  - metadata 的 `expected_outputs` 中新增 shared dependency stamp：
+    - checkout stamps
+    - build stamps
+  - 新增 `shared_logs` 字段，记录 checkout/build 这些共享日志路径。
+  - `shared_logs` 明确表示“共享目标当前日志路径”，不表示某个 experiment 独占的日志快照。
+
+- `tools/inspect_workflow_outputs.py`
+  - 新增 `shared_deps` 列。
+  - inspect 现在会先检查 shared checkout/build stamp，再检查 raw results、parsed、aggregated、report。
+  - 对旧 metadata 兼容：如果 metadata 中没有新增的 stamp 字段，会从已有 `paths` 字段推断 stamp 路径。
+  - 失败诊断更具体。例如 Official build 失败时，`next_step` 会显示：
+    - `rebuild shared dependency; missing official build`
+    而不是只显示：
+    - `run benchmark stage; missing official raw result`
+
+- `work_plan.md`
+  - 阶段三已标记完成。
+  - 后续近期优先级推进到阶段四。
+  - 阶段三规划中移除了 `build_slots` 设计，明确继续使用 Snakemake `-j`。
+
+#### 关于 clean_build 与 reconfigure 的结论
+
+- `clean_build` 控制是否清空 build 目录。
+- `reconfigure` 控制是否重新运行 CMake configure。
+- 常规运行推荐：
+  - `clean_build: false`
+  - `reconfigure: true`
+- 如果 build 目录损坏或需要彻底重建，可以临时设置：
+  - `clean_build: true`
+- 即使 `reconfigure: false`，只要 `CMakeCache.txt` 不存在，系统仍会自动运行 CMake configure。
+
+#### 关于 shared logs 的结论
+
+- `_shared` 日志路径由 `Snakefile` 中的 rule log 路径决定，是手写的目录约定，不是运行时自动推断。
+- checkout/build 产物本身会被多个 experiment 共享，因此它们的日志也放在 `logs/_shared/`。
+- run 日志包含 `run_label`，不是 shared。
+- parse、aggregate、report、metadata 按 `experiment_id` 隔离，也不是 shared。
+- shared log 后续重跑时可能被覆盖，因此不能当作某一次 experiment 的不可变日志快照。
+- 真正需要追溯某次完整 Snakemake 执行时，应结合 `.snakemake/log/<timestamp>.snakemake.log`。
+
+#### 验证与结果
+
+- 已执行 `py_compile` 检查受影响 Python 模块。
+- 已执行 `./run.sh dry-run` 验证 DAG 展开。
+- 已执行 `./run.sh disk --top 1` 验证磁盘报告工具。
+- 已执行 `./run.sh inspect` 验证 shared dependency 诊断。
+- 使用故意失败的 Official test-suite commit 验证：
+  - metadata 能先生成。
+  - RAJA 独立分支可以继续运行。
+  - Snakemake 能定位失败 rule 和 rule log。
+  - inspect 能指出 `official build` 缺失，而不是只报告 raw result 缺失。
+
+#### Commit Message
+
+Improve build caching and workflow diagnostics.
+Keep CMake build directories by default, add explicit clean/reconfigure controls, move suite-specific CMake arguments into a build config module, add a read-only disk usage tool, and improve inspect output for shared checkout/build dependencies.
+
+#### Weekly Update
+
+- This week I improved the build cache behavior so CMake/Ninja build directories are reused by default instead of being cleared on every build rule execution.
+- I added explicit `clean_build` and `reconfigure` settings, keeping normal runs incremental while still allowing clean rebuilds when needed.
+- I moved LLVM, Official test-suite, and RAJAPerf CMake argument generation into a dedicated build configuration module, reducing suite-specific logic in `common.py`.
+- I added a read-only disk usage command through `./run.sh disk`, which helps identify where workflow storage is being used without modifying Snakemake state.
+- I refined experiment inspection so shared checkout/build dependencies are checked before raw results, making failed build stages easier to identify.
+- I also documented the shared log model: checkout/build logs are shared by reusable targets, while run and experiment-level logs remain run- or experiment-scoped.
