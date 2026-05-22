@@ -431,22 +431,42 @@
 
 完成报告中 Task 1.4 的核心要求，让 parser 对 suite 版本变化、字段缺失、异常结果更稳健。
 
+本阶段的直接触发案例是 RAJAPerf `v2025.03.0` 的真实失败运行：该版本正常执行并生成 `RAJAPerf-timing-Average.csv`、`RAJAPerf-speedup-Average.csv`、`RAJAPerf-fom.csv`、`RAJAPerf-kernels.csv`，但没有生成当前工作流硬编码期待的 `RAJAPerf-kernel-run-data.csv`，导致失败被归类为 `run_raja` 失败，而不是解析层发现了“不支持的 RAJA 输出 schema”。
+
+因此阶段 4 的核心目标不是简单增加字段兼容，而是重新划清边界：
+
+- `run_*` 阶段只负责确认 benchmark 程序运行完成，并记录原始输出目录中出现了哪些结果文件。
+- `parse_results` 阶段负责发现、识别和解析具体结果格式。
+- 版本/格式差异通过 parser adapter 处理，而不是继续写死在 `Snakefile` 或 run 脚本中。
+
 ### 当前差距
 
 - `workflow/lib/parse_results.py` 仍以“固定文件名 + 固定字段名”为主。
-- 解析逻辑把 suite 版本识别直接绑定到目录命名。
+- `workflow/Snakefile` 和 `workflow/scripts/run_raja.py` 都把 `RAJAPerf-kernel-run-data.csv` 当成 RAJA run 成功的唯一标志。
+- RAJA 新格式 `RAJAPerf-kernel-run-data.csv` 是长表格式，当前 parser 能够隐式解析。
+- RAJA 旧/不同格式 `RAJAPerf-timing-Average.csv` 是矩阵格式，当前 parser 不能解析。
+- RAJA 不同格式可提供的指标不同：`kernel-run-data` 可提供 checksum、runtime、bandwidth、GFLOP/s；`timing-Average` 主要提供 runtime。
+- 当前失败诊断落点不够准确：格式不支持时会表现为 run 阶段缺少输出文件，而不是 parse 阶段报告 unsupported schema。
+- 解析逻辑把 suite 版本和目录命名耦合在一起，缺少基于文件内容的 schema 检测。
 - 缺少 schema version、字段映射层和兼容测试。
 
 ### 需要完成的功能
 
 - 建立 parser adapter 层。
-- 支持不同 suite 版本的字段兼容。
+- 支持 RAJA 至少两种已观察到的输出格式：
+  - `RAJAPerf-kernel-run-data.csv`
+  - `RAJAPerf-timing-Average.csv`
+- 支持不同 suite 版本的字段兼容和格式识别。
 - 支持部分缺失字段时降级解析而不是整体失败。
 - 把“测试失败/崩溃/无结果”纳入统一记录模型。
+- 提供清晰的 unsupported schema 错误信息，包括结果目录、已发现文件、期望格式和建议检查的日志。
 
 ### 需要修改/新增的代码或文件
 
+- `workflow/Snakefile`
 - `workflow/lib/parse_results.py`
+- `workflow/scripts/run_raja.py`
+- `workflow/scripts/write_experiment_metadata.py`
 - 新增：
   - `workflow/lib/parsers/base.py`
   - `workflow/lib/parsers/official.py`
@@ -469,18 +489,38 @@
    - 字段映射
    - 容错清洗
 
-3. 对 Official suite 重点处理：
+3. 调整 RAJA run 和 parse 的职责边界。
+   - `run_raja` 不再要求固定产物必须是 `RAJAPerf-kernel-run-data.csv`。
+   - `run_raja` 应在 RAJAPerf 程序返回成功后扫描结果目录，确认至少存在一个受支持或可诊断的 RAJA 输出文件。
+   - `.run_complete` 中记录本次发现的 RAJAPerf 输出文件列表。
+   - `Snakefile` 中 `run_raja` 的显式输出应避免绑定到某一个格式文件；可以改为结果目录 + `.run_complete`，或只把 `.run_complete` 作为下游依赖。
+   - `parse_results` 从 RAJA result directory 中进行文件发现，而不是依赖单一 CSV 文件路径。
+
+4. 对 RAJA 建立两个首批 adapter。
+   - `KernelRunDataAdapter`
+     - 识别 `RAJAPerf-kernel-run-data.csv`。
+     - 解析长表字段：`Kernel`、`Variant`、`Tuning`、`Checksum`、`Mean time per rep (sec.)`、`Mean Bandwidth (GiB per sec.)`、`Mean flops (gigaFLOP per sec.)`。
+     - 作为信息最完整的优先格式。
+   - `TimingAverageAdapter`
+     - 识别 `RAJAPerf-timing-Average.csv`。
+     - 解析矩阵式 header：第一行 report title，第二行 variant，第三行 tuning，后续行为 kernel。
+     - 将矩阵拉平成统一记录：`kernel`、`variant`、`tuning`、`exec_time`。
+     - 对 `Not run`、空值、非数值单元格做跳过或记录为非成功状态。
+     - `status` 暂设为 `UNKNOWN` 或 `COMPLETED`，后续可结合 `RAJAPerf-checksum.txt` 补充。
+     - `bandwidth_gib` 和 `flops_gflops` 在该格式下允许为空。
+
+5. 建立 RAJA adapter 选择规则。
+   - 如果同时存在 `RAJAPerf-kernel-run-data.csv` 和 `RAJAPerf-timing-Average.csv`，优先使用 `kernel-run-data`，因为指标更完整。
+   - 如果只存在 `timing-Average`，降级解析 runtime。
+   - 如果没有受支持的 RAJA 文件，则 parse 阶段失败，并输出可读诊断。
+   - adapter 不应依赖 tag 名称判断格式，优先通过文件存在性和 header 内容检测。
+
+6. 对 Official suite 重点处理：
    - JSON 中不同 test 类型字段差异
    - MicroBenchmarks 与普通 tests 的差异
    - 运行失败项、缺少 exec_time 项
 
-4. 对 RAJA 重点处理：
-   - CSV 标题变化
-   - `Kernel / Variant / Tuning` 拼接规则
-   - PASSED 之外的状态
-   - FOM、带宽、GFLOP/s 额外字段兼容
-
-5. 增加元数据列：
+7. 增加元数据列：
    - `suite_name`
    - `suite_version`
    - `compiler_tag`
@@ -489,22 +529,35 @@
    - `run_label`
    - `platform`
    - `hostname`
+   - `source_file`
+   - `parser_adapter`
    - `status_detail`
 
-6. 输出格式建议升级：
+8. 输出格式建议升级：
    - 继续保留 CSV，便于人工查看。
-   - 把 Parquet 变成默认分析格式，提升后续多版本分析效率。
+   - 暂不强制把 Parquet 变成默认输出；可以先保留可选支持，避免阶段 4 同时改变数据格式和解析架构。
 
-7. 模块边界整理：
+9. 模块边界整理：
    - 将 `BenchmarkMetrics`、`BenchmarkRecord` 等数据模型移入 `result_schema.py`。
    - 将 Official 和 RAJA 的文件发现、schema 检测和字段映射从 `parse_results.py` 中拆出。
    - 视情况把 `read_table` / `write_table` 这类通用表格 IO 抽到 `tables.py`，供 parser、reporting 和后续分析模块共享。
 
 ### 验收标准
 
-- 至少能兼容当前 `auto/` 结果和一份字段略有变化的模拟结果。
+- 当前已观察到的 RAJA 新格式结果可以继续解析：
+  - `RAJAPerf-kernel-run-data.csv`
+- 当前已观察到的 RAJA `v2025.03.0` 旧/不同格式结果可以解析：
+  - `RAJAPerf-timing-Average.csv`
+- `v2025.03.0` 这类 RAJA 运行不应因为缺少 `RAJAPerf-kernel-run-data.csv` 在 `run_raja` 阶段失败；如果解析仍不支持某种格式，应在 `parse_results` 阶段给出清晰错误。
+- `TimingAverageAdapter` 输出的 RAJA records 至少应包含 `suite_name`、`suite_version`、`compiler_version`、`run_label`、`test_name`、`exec_time`、`parser_adapter`、`source_file`。
+- `KernelRunDataAdapter` 保留现有 runtime、bandwidth、GFLOP/s、checksum 信息。
 - 对缺失字段会给 warning，不会整批解析失败。
-- parser 单元测试覆盖关键分支。
+- parser 单元测试覆盖关键分支，包括：
+  - 新格式 RAJA 长表解析
+  - 旧/不同格式 RAJA timing matrix 解析
+  - 同时存在多个 RAJA 文件时的优先级选择
+  - 没有受支持 RAJA 文件时的错误信息
+  - Official JSON 的基本解析回归
 
 ---
 
