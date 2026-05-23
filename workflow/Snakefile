@@ -181,7 +181,6 @@ rule run_raja:
         build_stamp=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
         exe=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / "bin" / "raja-perf.exe"),
     output:
-        results=str(BASE_DIR / "results" / "raja-{raja_tag}" / "{llvm_tag}" / "{run_label}" / "RAJAPerf-kernel-run-data.csv"),
         stamp=str(BASE_DIR / "results" / "raja-{raja_tag}" / "{llvm_tag}" / "{run_label}" / ".run_complete"),
     log:
         str(BASE_DIR / "logs" / "_runs" / "raja" / "{raja_tag}" / "{llvm_tag}" / "{run_label}" / "run_raja.log"),
@@ -201,9 +200,6 @@ rule parse_results:
         ),
         official_stamp=lambda wildcards: str(
             layout_from_experiment_id(wildcards.experiment_id)["official_result"] / ".run_complete"
-        ),
-        raja_results=lambda wildcards: str(
-            layout_from_experiment_id(wildcards.experiment_id)["raja_result"] / "RAJAPerf-kernel-run-data.csv"
         ),
         raja_stamp=lambda wildcards: str(
             layout_from_experiment_id(wildcards.experiment_id)["raja_result"] / ".run_complete"

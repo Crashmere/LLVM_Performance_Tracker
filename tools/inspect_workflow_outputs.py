@@ -76,7 +76,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
         shared_status = get_shared_dependency_status(outputs, paths)
         shared_ok = all(shared_status.values())
         official_ok = exists(outputs.get("official_results"))
-        raja_ok = exists(outputs.get("raja_results"))
+        raja_ok = exists(outputs.get("raja_run_stamp")) or exists(outputs.get("raja_results"))
         parsed_ok = exists(outputs.get("parsed_csv"))
         aggregated_ok = exists(outputs.get("aggregated_csv"))
         report_ok = exists(outputs.get("report_html"))

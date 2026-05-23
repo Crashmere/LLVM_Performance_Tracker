@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.lib.parse_results import filter_records, parse_results_directory, write_records_table
+from workflow.lib.parse_results import parse_results_directory, write_records_table
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,16 +45,15 @@ def parse_suite_versions(entries: list[str]) -> dict[str, str]:
 def main() -> int:
     args = parse_args()
     suite_versions = parse_suite_versions(args.suite_version)
-    records = parse_results_directory(args.input_dir)
-    filtered_records = filter_records(
-        records,
+    records = parse_results_directory(
+        args.input_dir,
         suite_name=args.suite_name,
         compiler_version=args.compiler_version,
         run_label=args.run_label,
         suite_versions=suite_versions,
     )
-    output_path = write_records_table(filtered_records, args.output_file)
-    print(f"Wrote {len(filtered_records)} benchmark records to {output_path.resolve()}")
+    output_path = write_records_table(records, args.output_file)
+    print(f"Wrote {len(records)} benchmark records to {output_path.resolve()}")
     return 0
 
 
