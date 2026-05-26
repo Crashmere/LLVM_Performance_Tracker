@@ -473,8 +473,6 @@
   - `workflow/lib/parsers/raja.py`
   - `workflow/lib/result_schema.py`
   - 可选：`workflow/lib/tables.py`
-  - `tests/data/` 样例数据
-  - `tests/test_parse_results.py`
 
 ### 具体修改内容
 
@@ -552,12 +550,11 @@
 - `TimingAverageAdapter` 输出的 RAJA records 至少应包含 `suite_name`、`suite_version`、`compiler_version`、`run_label`、`test_name`、`exec_time`、`parser_adapter`、`source_file`。
 - `KernelRunDataAdapter` 保留现有 runtime、bandwidth、GFLOP/s、checksum 信息。
 - 对缺失字段会给 warning，不会整批解析失败。
-- parser 单元测试覆盖关键分支，包括：
-  - 新格式 RAJA 长表解析
-  - 旧/不同格式 RAJA timing matrix 解析
-  - 同时存在多个 RAJA 文件时的优先级选择
-  - 没有受支持 RAJA 文件时的错误信息
-  - Official JSON 的基本解析回归
+- 使用已有真实输出验证关键路径：
+  - 新格式 RAJA 长表解析。
+  - 旧/不同格式 RAJA timing matrix 解析。
+  - 新旧 RAJA 解析结果都能继续进入 aggregate/report。
+  - 没有受支持 RAJA 文件时的错误信息清晰可读。
 
 ---
 
@@ -567,61 +564,158 @@
 
 落实报告中的 Task 1.5，使用户可以控制运行范围，降低资源消耗并提升实验可管理性。
 
+阶段 5 建议拆成两层推进：
+
+- 阶段 5A：先实现最小可用的运行参数透传和 selection provenance。
+- 阶段 5B：在确认 Official lit 和 RAJAPerf 参数稳定后，再实现更高级的结构化 profile、kernel group 和过滤规则。
+
+这样可以尽快得到“smoke run / 子集运行”的实际能力，同时避免过早设计一套复杂抽象，最后又被各 suite 的真实命令行参数细节推翻。
+
 ### 当前差距
 
 - 当前 Official 和 RAJA 都是按默认方式整体构建、整体运行。
-- 没有选择 kernel / benchmark 子集的接口。
+- `run_official.py` 中 lit 命令固定为 `lit -v -o <json> <build_dir>`，没有配置化附加参数。
+- `run_raja.py` 中 RAJAPerf 命令固定为只执行 `raja-perf.exe`，没有配置化附加参数。
+- 没有在 `.run_complete` 或 metadata 中记录本次运行是否使用了子集参数。
 - 没有“快速 smoke run”模式。
+- 当前阶段四已解决 RAJA 多输出格式解析，因此阶段五可以安全地让 run 阶段传递不同 RAJAPerf 参数，而不再依赖固定 raw CSV 文件名。
 
-### 需要完成的功能
+### 阶段 5A：最小可用运行参数透传
 
-- 支持按 suite 定义测试子集。
-- 支持不同粒度的过滤：
-  - Official：目录、文件、正则、lit filter
-  - RAJA：kernel list、variant list、运行模式
-- 支持预定义 profile：
-  - smoke
-  - vectorization
-  - microbenchmarks
-  - full
+#### 目标
 
-### 需要修改/新增的代码或文件
+第一步只做两件事：
+
+- 允许用户通过配置给 Official lit 和 RAJAPerf 追加原生命令行参数。
+- 把这些参数写入 run stamp 和 experiment metadata，保证结果可以追溯。
+
+这一版不尝试把所有 suite 参数抽象成统一语义。Official 先暴露 `lit_args`，RAJA 先暴露 `extra_args`，让用户可以直接使用上游工具已经支持的过滤方式。
+
+#### 需要完成的功能
+
+- 支持全局 test selection 配置。
+- Official 支持透传 `lit_args`。
+- RAJA 支持透传 `extra_args`。
+- 运行 stamp 记录实际执行参数。
+- experiment metadata 记录 selection 配置快照。
+- 能通过配置写出一个较快的 smoke run。
+
+#### 需要修改/新增的代码或文件
 
 - `config.yml`
 - `workflow/Snakefile`
 - `workflow/scripts/run_official.py`
 - `workflow/scripts/run_raja.py`
-- 新增：
+- `workflow/scripts/write_experiment_metadata.py`
+- 可选新增：
   - `workflow/lib/test_selection.py`
 
-### 具体修改内容
+#### 建议配置结构
 
-1. 为 Official 增加配置字段：
-   - `benchmark_filter`
-   - `lit_args`
-   - `test_paths`
-   - `exclude_patterns`
+建议先增加简单、直接、接近原生命令行的配置：
 
-2. 为 RAJA 增加配置字段：
-   - `kernel_groups`
-   - `variants`
-   - `extra_args`
-   - `problem_sizes`
+```yaml
+test_selection:
+  profile: "full"
 
-3. 修改 run 脚本，使其将配置转换成真实命令参数。
+  official:
+    lit_args: []
 
-4. 在结果目录或 manifest 中记录本次选择了哪些子集，避免报告失去上下文。
+  raja:
+    extra_args: []
+```
 
-5. 增加“快速验证目标”：
-   - 少量 Official 测试
-   - 少量 RAJA kernels
-   - 用于改代码后的快速回归
+后续可以在注释中给出 smoke 示例，但第一版代码只需要读取 `lit_args` 和 `extra_args`。
 
-### 验收标准
+#### 具体修改内容
 
-- 用户能通过配置只跑 TSVC 或只跑 RAJA 中的某类 kernels。
-- smoke profile 能在明显更短时间内完成一次完整流程。
-- 报告中能看到这次结果是基于哪个子集生成的。
+1. 配置归一化。
+   - 在 `common.py` 的配置归一化结果中加入 `test_selection`。
+   - `test_selection.profile` 默认为 `full`。
+   - `official.lit_args` 默认为空列表。
+   - `raja.extra_args` 默认为空列表。
+   - 明确只接受 list，不做字符串拆分，避免 shell quoting 歧义。
+
+2. Snakemake 参数传递。
+   - `rule run_official` params 增加 `lit_args`。
+   - `rule run_raja` params 增加 `extra_args`。
+   - 保持 run rule 输出路径不随参数自动变化；是否复用 run_label 由用户负责。
+   - 文档中提醒：同一个 `run_label` 下改变 selection 参数会覆盖或重用同一路径，因此正式实验应给不同 selection 使用不同 `run_label`。
+
+3. Official run 脚本。
+   - 当前命令：
+     - `lit -v -o <result_path> <build_dir>`
+   - 修改为：
+     - `lit -v -o <result_path> <lit_args...> <build_dir>`
+   - `.run_complete` 中记录 `lit_args`。
+
+4. RAJA run 脚本。
+   - 当前命令：
+     - `raja-perf.exe`
+   - 修改为：
+     - `raja-perf.exe <extra_args...>`
+   - `.run_complete` 中记录 `extra_args`。
+
+5. Metadata。
+   - `experiment.json` 中新增 `test_selection` 字段。
+   - 记录 normalized selection，而不是只记录原始 config。
+   - 后续报告可根据该字段显示“full run / smoke run / custom args”。
+
+6. smoke 配置示例。
+   - 在 `config.yml` 注释中提供一个可切换的 smoke 示例。
+   - 第一版可以只作为配置示例，不新增 Snakemake rule。
+
+#### 阶段 5A 验收标准
+
+- `./run.sh dry-run` 能看到 run rule 接收 selection 参数。
+- Official 能通过 `lit_args` 改变 lit 命令。
+- RAJA 能通过 `extra_args` 改变 `raja-perf.exe` 命令。
+- `.run_complete` 中能看到本次使用的参数。
+- `auto/metadata/<experiment_id>/experiment.json` 中能看到 normalized `test_selection`。
+- 使用 smoke 配置时，运行时间或输出规模明显小于 full run。
+- parsed / aggregate / report 仍能正常生成。
+
+### 阶段 5B：结构化子集选择和 profile 增强
+
+#### 目标
+
+在阶段 5A 的参数透传稳定后，再把常用选择方式封装成更友好的结构化配置，减少用户直接记忆 suite 命令行参数的负担。
+
+#### 后续可完善功能
+
+- Official 结构化选择：
+  - `test_paths`
+  - `benchmark_filter`
+  - `exclude_patterns`
+  - 常用 lit filter 的配置模板
+
+- RAJA 结构化选择：
+  - `kernels`
+  - `kernel_groups`
+  - `variants`
+  - `problem_sizes`
+  - 常用 RAJAPerf smoke 参数模板
+
+- 预定义 profile：
+  - `full`
+  - `smoke`
+  - `vectorization`
+  - `microbenchmarks`
+
+- 新增 `workflow/lib/test_selection.py`。
+  - 当 selection 逻辑不再只是简单列表透传时，将配置解释和命令参数生成移入该模块。
+  - run 脚本只接收已经生成好的参数列表，避免脚本里堆积 suite-specific 规则。
+
+- 报告展示增强。
+  - 在 HTML report 中显示当前 selection profile 和关键参数。
+  - 在 parsed/aggregated 表格中增加 selection 相关字段，便于后续跨 run 对比时过滤 full/smoke/custom run。
+
+#### 阶段 5B 验收标准
+
+- 用户可以通过结构化配置只跑 TSVC 或只跑 RAJA 中的某类 kernels。
+- `smoke` profile 可以作为开发后的快速验证配置。
+- 报告中能看到这次结果基于哪个 profile 或参数子集生成。
+- 不同 selection 的结果不会在 provenance 上混淆。
 
 ---
 
