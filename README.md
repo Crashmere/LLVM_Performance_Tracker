@@ -616,3 +616,154 @@ Keep CMake build directories by default, add explicit clean/reconfigure controls
 - I added a read-only disk usage command through `./run.sh disk`, which helps identify where workflow storage is being used without modifying Snakemake state.
 - I refined experiment inspection so shared checkout/build dependencies are checked before raw results, making failed build stages easier to identify.
 - I also documented the shared log model: checkout/build logs are shared by reusable targets, while run and experiment-level logs remain run- or experiment-scoped.
+
+### 阶段四：数据解析层重构与 RAJA 多格式适配
+
+这一阶段的直接背景，是在阶段三测试失败场景时发现 RAJAPerf 不同版本的原始输出并不完全一致。较新的 RAJA 结果会生成 `RAJAPerf-kernel-run-data.csv`，这是当前系统原先硬编码依赖的长表格式；但 `v2025.03.0` 能正常运行到 `DONE!!!`，实际只生成 `RAJAPerf-timing-Average.csv`、`RAJAPerf-speedup-Average.csv`、`RAJAPerf-fom.csv`、`RAJAPerf-kernels.csv` 等文件，没有 `RAJAPerf-kernel-run-data.csv`。
+
+旧设计的问题在于：`run_raja` 把缺少某个固定 CSV 文件直接判定为 benchmark run 失败。实际上这不是 RAJAPerf 运行失败，而是解析层不支持该版本的输出 schema。阶段四因此把边界重新划清：run 阶段负责确认 benchmark 程序运行并产出原始文件；parse 阶段负责发现、识别和解析具体格式。
+
+#### 主要设计决策
+
+- 不再把 `RAJAPerf-kernel-run-data.csv` 作为 RAJA run 成功的唯一标志。
+- RAJA run rule 的下游依赖改为 `.run_complete`，具体 CSV 文件由 parser adapter 在结果目录中发现。
+- Official 和 RAJA 的解析逻辑拆成 adapter，`parse_results.py` 只保留目录扫描和表格输出两个当前入口。
+- RAJA adapter 通过文件名和 header 内容识别格式，不依赖 tag 名称判断版本。
+- 当多个 RAJA 格式同时存在时，优先使用 `RAJAPerf-kernel-run-data.csv`，因为它包含 checksum、runtime、bandwidth、GFLOP/s。
+- 当只有 `RAJAPerf-timing-Average.csv` 时，降级解析 runtime；checksum、bandwidth、GFLOP/s 允许为空。
+- 不保留面向旧代码调用方式的兼容包装函数；当前代码只支持阶段四后的新结构。
+
+#### 具体修改
+
+- `workflow/lib/result_schema.py`
+  - 新增统一结果数据模型：
+    - `BenchmarkMetrics`
+    - `BenchmarkRecord`
+  - 新增安全类型转换：
+    - `safe_float()`
+    - `safe_int()`
+  - 新增 `records_to_dataframe()`，统一把解析结果展开成表格列。
+  - 表格中新增 provenance / parser 相关列：
+    - `compiler_tag`
+    - `compiler_commit`
+    - `platform`
+    - `hostname`
+    - `source_file`
+    - `parser_adapter`
+    - `status_detail`
+
+- `workflow/lib/parsers/base.py`
+  - 新增 parser adapter 基类 `ResultParser`。
+  - 新增 `ParseError`，用于报告不支持的结果 schema 或无法解析的结果目录。
+
+- `workflow/lib/parsers/official.py`
+  - 新增 `OfficialJsonAdapter`。
+  - Official test-suite 的 `baseline_results.json` 解析逻辑从 `parse_results.py` 中迁出。
+  - 每条 Official 记录会写入 `source_file` 和 `parser_adapter=official_json`。
+
+- `workflow/lib/parsers/raja.py`
+  - 新增 `KernelRunDataAdapter`。
+    - 识别并解析 `RAJAPerf-kernel-run-data.csv`。
+    - 保留原有 runtime、bandwidth、GFLOP/s、checksum 信息。
+    - 输出 `parser_adapter=raja_kernel_run_data`。
+  - 新增 `TimingAverageAdapter`。
+    - 识别并解析 `RAJAPerf-timing-Average.csv`。
+    - 将矩阵格式拉平成统一记录：
+      - `Kernel + Variant + Tuning -> test_name`
+      - 单元格数值 -> `exec_time`
+    - 跳过 `Not run`、空值和非数值单元格。
+    - 将 `status` 设为 `COMPLETED`，并在 `status_detail` 中说明 checksum 不可用。
+    - 输出 `parser_adapter=raja_timing_average`。
+  - 新增 `parse_raja_result_directory()`。
+    - 在 RAJA run 目录中自动选择可支持格式。
+    - 如果没有受支持的格式，抛出包含目录、已发现文件和支持文件列表的清晰错误。
+
+- `workflow/lib/parse_results.py`
+  - 从“解析实现集合”收敛为解析调度层。
+  - 保留当前真正使用的两个入口：
+    - `parse_results_directory()`
+    - `write_records_table()`
+  - 删除阶段四过程中临时保留的旧兼容包装函数：
+    - `parse_raja_csv()`
+    - `extract_official_records()`
+    - `extract_raja_records()`
+    - `filter_records()`
+  - 删除旧的 `__all__` 重导出。
+  - 目录扫描时会按 suite、suite version、compiler version、run label 预先过滤，避免不相关历史结果中的坏格式影响当前 experiment。
+
+- `workflow/scripts/parse_results_cli.py`
+  - CLI 继续作为 Snakemake 的解析入口。
+  - 将 `--suite-version`、`--compiler-version`、`--run-label` 等过滤条件直接传给 `parse_results_directory()`。
+  - 不再先全量扫描再二次过滤。
+
+- `workflow/scripts/run_raja.py`
+  - 不再读取 `snakemake.output.results` 中的固定 CSV 路径。
+  - RAJAPerf 程序返回成功后，扫描结果目录中的 `RAJAPerf*` 文件。
+  - 只要存在 RAJAPerf 原始输出文件，就写 `.run_complete`。
+  - `.run_complete` 中记录本次发现的 `result_file=...` 列表。
+
+- `workflow/Snakefile`
+  - `run_raja` 的 output 删除固定的 `RAJAPerf-kernel-run-data.csv`。
+  - `run_raja` 现在只声明 `.run_complete`。
+  - `parse_results` 不再把固定 RAJA CSV 作为 input，只依赖 RAJA `.run_complete`，再由 parser adapter 发现具体文件。
+
+- `workflow/scripts/write_experiment_metadata.py`
+  - metadata 中 RAJA expected outputs 从单一 `raja_results` 扩展为：
+    - `raja_result_dir`
+    - `raja_run_stamp`
+    - `raja_kernel_run_data`
+    - `raja_timing_average`
+  - 这样 metadata 能表达当前支持的两种 RAJA 原始格式。
+
+- `tools/inspect_workflow_outputs.py`
+  - RAJA raw result 是否存在的判断改为优先看 `raja_run_stamp`。
+  - 对旧 metadata 中的 `raja_results` 保留读取能力，仅用于已有记录的检查。
+
+#### 关于 RAJA 输出格式的结论
+
+- `RAJAPerf-kernel-run-data.csv` 是当前信息最完整、最适合分析的 RAJA 格式。
+- `RAJAPerf-timing-Average.csv` 可以作为降级格式支持 runtime 分析。
+- `timing-Average` 不应伪造 checksum、bandwidth 或 GFLOP/s；这些字段保持为空更诚实。
+- RAJA run 成功不等于某个特定 CSV 文件存在；run 成功和 parse schema 支持必须分开判断。
+- 后续如果 RAJA 再出现新格式，应新增 adapter，而不是修改 `Snakefile` 或 `run_raja.py` 中的硬编码路径。
+
+#### 关于解析层结构的结论
+
+- `parse_results.py` 当前只负责：
+  - 扫描 `auto/results` 目录。
+  - 根据 suite/version/compiler/run 过滤目标目录。
+  - 调用对应 adapter。
+  - 写出统一表格。
+- 具体文件格式细节属于 `workflow/lib/parsers/`。
+- 统一数据模型属于 `workflow/lib/result_schema.py`。
+- 这种结构比原先所有解析逻辑堆在 `parse_results.py` 中更适合后续加入新 suite、新格式或更严格 schema 检查。
+
+#### 验证与结果
+
+- 已执行 `py_compile` 检查受影响 Python 模块。
+- 已验证较新 RAJA 格式可以解析：
+  - `RAJAPerf-kernel-run-data.csv`
+  - 输出 `parser_adapter=raja_kernel_run_data`
+- 已验证 `v2025.03.0` RAJA timing 格式可以解析：
+  - `RAJAPerf-timing-Average.csv`
+  - 输出 `parser_adapter=raja_timing_average`
+- 已验证旧格式解析结果可以继续 aggregate 并生成 report。
+- 已执行 `./run.sh dry-run` 验证 Snakemake DAG 展开。
+- 已执行 `git diff --check` 检查格式。
+- 在删除旧兼容接口后再次验证：
+  - 新 RAJA 格式解析成功。
+  - 旧 RAJA timing 格式解析成功。
+
+#### Commit Message
+
+Refactor result parsing and support multiple RAJAPerf output formats.
+Introduce parser adapters and a shared result schema, move Official and RAJA parsing out of the dispatcher, decouple RAJA run completion from a fixed CSV filename, and support both RAJAPerf kernel-run-data and timing-average outputs.
+
+#### Weekly Update
+
+- This week I refactored the result parsing layer so format-specific logic lives in parser adapters rather than in the main parsing dispatcher.
+- I added a shared benchmark record schema, which keeps parsed Official and RAJA results in a consistent table while preserving parser provenance.
+- I changed RAJA run handling so benchmark execution success no longer depends on one hard-coded CSV filename.
+- I added RAJA support for both the newer `RAJAPerf-kernel-run-data.csv` format and the older matrix-style `RAJAPerf-timing-Average.csv` format.
+- I verified both real RAJA output formats from existing workflow results.
+- I also removed temporary backward-compatible parsing wrappers, keeping the codebase aligned with the current adapter-based design.
