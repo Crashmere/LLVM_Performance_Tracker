@@ -761,3 +761,146 @@ Introduce parser adapters and a shared result schema, move Official and RAJA par
 - I added RAJA support for both the newer `RAJAPerf-kernel-run-data.csv` format and the older matrix-style `RAJAPerf-timing-Average.csv` format.
 - I verified both real RAJA output formats from existing workflow results.
 - I also removed temporary backward-compatible parsing wrappers, keeping the codebase aligned with the current adapter-based design.
+
+### 阶段五 A：测试子集参数透传与标签配置收敛
+
+这一阶段的目标，是先用最小、直接、稳定的方式支持测试子集选择，而不是马上设计一套复杂的结构化 benchmark selection DSL。当前系统已经可以把用户在配置中写的 Official lit 参数和 RAJAPerf 参数直接传给对应 run 脚本，从而支持 smoke run、局部 kernel run 或其它 suite 原生命令行能力。
+
+本阶段还顺手清理了一个配置语义问题：系统里原先同时出现过 `profile`、`name`、`run_label`、`runs.labels`、`repeat_count` 等多个类似“标签/运行标识”的概念。它们会让结果目录隔离、metadata provenance 和重复实验设计混在一起。因此阶段五 A 将当前系统收敛为唯一的全局 `label` 配置；如果用户不配置，系统自动使用时间戳。
+
+阶段五 A 后续测试中还发现一个报告可用性问题：Plotly HTML 默认引用外部 CDN，在无外网环境或 IDE preview 中会出现空白页面。由于 report 是需要归档和离线查看的 workflow 产物，本阶段将报告生成改为内嵌 Plotly JS 的自包含 HTML。
+
+#### 主要设计决策
+
+- `test_selection` 第一版只做参数透传，不做复杂解释。
+- Official 使用 `test_selection.official.lit_args`，这些参数插入到 `lit -v -o <result> ... <build_dir>` 中。
+- RAJA 使用 `test_selection.raja.extra_args`，这些参数追加到 `raja-perf.exe` 后面。
+- selection 参数必须写成 YAML list，不做字符串拆分，避免 shell quoting 歧义。
+- run rule 的输出路径不自动根据 selection 参数变化；是否复用同一个 `label` 由用户负责。
+- 正式实验切换 full/subset/smoke 参数时，建议显式设置不同 `label`，避免覆盖或混淆结果。
+- 全系统只保留一个标签字段 `label`，不再支持多个 label 或旧的 `run_label` 写法。
+- 重复实验暂不在当前配置模型里实现；未来如果需要，应设计独立的 repeat/sample 机制，而不是重新引入多个标签字段。
+- 报告 HTML 应默认自包含，不依赖外部 CDN；文件体积变大可以接受，离线可读性更重要。
+
+#### 具体修改
+
+- `config.yml`
+  - 新增公共配置示例：
+    - `# label: "baseline"`
+  - 新增当前启用的 full selection 配置：
+    - `test_selection.official.lit_args: []`
+    - `test_selection.raja.extra_args: []`
+  - 新增注释掉的 subset/smoke 示例，方便通过切换注释快速测试。
+  - 移除旧的 `runs` 配置块，不再保留 `runs.labels` 或 `repeat_count`。
+  - explicit mode 示例中不再写单独的 `name`、`run_label` 或重复次数。
+
+- `workflow/lib/common.py`
+  - 新增 `normalize_test_selection()`，统一校验并归一化 selection 配置。
+  - 新增 `as_string_list()`，供 run 脚本读取 Snakemake params 时复用。
+  - 新增单一 `label` 归一化逻辑：
+    - 配置存在时使用配置值。
+    - 配置缺失时生成 `YYYYMMDD_HHMMSS` 时间戳。
+    - 如果写成 list，则直接报错，因为当前只允许一个全局 label。
+  - 删除旧的 `runs.labels`、`run_label`、`run_labels`、`repeat_count` 展开逻辑。
+  - simple mode 和 explicit mode 都使用同一个全局 `label`。
+  - `experiment_id` 中的运行标识段从 `run_<...>` 改为 `label_<...>`。
+
+- `workflow/Snakefile`
+  - `rule run_official` 新增 `lit_args` params。
+  - `rule run_raja` 新增 `extra_args` params。
+  - run 结果路径和 run 日志路径统一使用 `{label}` wildcard。
+  - `parse_results` 调用从 `--run-label` 改为 `--label`。
+
+- `workflow/scripts/run_official.py`
+  - 从 `workflow.lib.common` 导入 `as_string_list()`。
+  - 将 `lit_args` 插入 lit 命令。
+  - `.run_complete` 中记录本次使用的 `lit_args`。
+
+- `workflow/scripts/run_raja.py`
+  - 从 `workflow.lib.common` 导入 `as_string_list()`。
+  - 将 `extra_args` 追加到 `raja-perf.exe` 命令。
+  - `.run_complete` 中记录本次使用的 `extra_args`。
+
+- `workflow/scripts/write_experiment_metadata.py`
+  - metadata 中写入 normalized `test_selection`。
+  - run 日志路径使用 `experiment["label"]`。
+
+- `workflow/scripts/parse_results_cli.py`
+  - CLI 参数从 `--run-label` 改为 `--label`。
+
+- `workflow/lib/parse_results.py`、`workflow/lib/result_schema.py`、`workflow/lib/parsers/`
+  - 解析过滤参数和输出 schema 从 `run_label` 统一改为 `label`。
+  - 输出表格列名现在是 `label`，不再生成 `run_label` 列。
+
+- `workflow/lib/layout.py`
+  - 结果目录布局使用 `label`：
+    - `auto/results/official-<official_tag>/<llvm_tag>/<label>/`
+    - `auto/results/raja-<raja_tag>/<llvm_tag>/<label>/`
+
+- `tools/inspect_workflow_outputs.py`
+  - 汇总表字段从 `run_label` 改为 `label`。
+  - RAJA raw result 判断收敛为检查 `.run_complete`，与阶段四后的 RAJA 多格式解析边界一致。
+
+- `workflow/lib/reporting.py`
+  - `generate_pure_plotly_report()` 从 `include_plotlyjs="cdn"` 改为 `include_plotlyjs=True`。
+  - 新生成的 report 会内嵌 Plotly JS，不再需要浏览器访问 `cdn.plot.ly`。
+  - 代价是 HTML 文件明显变大；一次测试中自包含 report 约为 `4.8 MB`。
+
+- `work_plan.md`
+  - 更新阶段五 A 的当前设计。
+  - 移除对旧标签/重复运行配置的当前能力描述。
+  - 将重复实验和统计显著性保留为后续需要重新设计的功能。
+
+#### 关于 `test_selection` 的结论
+
+- 现阶段最稳妥的做法是保留 suite 原生命令行参数入口。
+- `lit_args` 和 `extra_args` 足以支持第一批 smoke/subset 实验。
+- 不应该在 run 脚本里硬编码 suite-specific 的复杂筛选规则。
+- 如果后续常用筛选模式稳定下来，再进入阶段五 B，把它们封装成结构化配置和 `workflow/lib/test_selection.py`。
+
+#### 关于 `label` 的结论
+
+- 当前系统只有一个全局 `label`。
+- `label` 同时用于结果目录隔离、run 日志路径和 `experiment_id` 生成。
+- 不配置 `label` 时，系统自动生成时间戳，这是默认推荐路径。
+- 配置 `label` 时，simple mode 和 explicit mode 中所有 experiment 共用这个 label。
+- 旧的 `run_label`、`runs.labels`、`run_labels`、`repeat_count`、`profile`、`name` 相关标签逻辑已从当前代码路径移除。
+
+#### 关于报告生成的结论
+
+- report 是最终研究产物，应该能在离线环境中直接打开。
+- 使用外部 Plotly CDN 会让服务器环境、IDE preview 或无外网浏览器出现白屏。
+- 当前默认生成自包含 HTML，避免外部 JS 依赖。
+- 如果只想重跑某次实验的报告，可以强制执行 `generate_report` rule，例如：
+
+```bash
+./run.sh -- --forcerun generate_report \
+  auto/reports/llvm_llvmorg-21.1.0__official_llvmorg-21.1.0__raja_v2025.12.0__label_20260527_022025/benchmark_report.html
+```
+
+#### 验证与结果
+
+- 已执行 `py_compile` 检查受影响 Python 模块。
+- 已执行 `./run.sh dry-run` 验证 Snakemake DAG 能正确展开。
+- 已验证配置归一化会生成单一全局 `label`。
+- 已验证 explicit mode 下多个 experiment 会共享同一个全局 `label`。
+- 已验证 metadata 生成脚本会写入 `experiment.label` 和 normalized `test_selection`。
+- 已验证现有结果解析可以通过 `--label` 过滤，并输出 `label` 列而不是 `run_label` 列。
+- 已使用 `label=20260527_022025` 的真实 aggregated CSV 重新生成临时自包含 report，确认 report 成功生成并包含 `Plotly.newPlot`。
+- 已执行 `git diff --check` 检查格式。
+- 已确认 `config.yml`、`workflow/` 和 `tools/` 中不再残留旧标签配置字段。
+
+#### Commit Message
+
+Add direct test selection parameters and unify workflow labels.
+Pass Official lit arguments and RAJAPerf extra arguments through the Snakemake run rules, record normalized test selection in metadata and run stamps, replace the old run-label/repeat configuration with a single global label, and make Plotly reports self-contained for offline viewing.
+
+#### Weekly Update
+
+- This week I added the first test selection mechanism by passing user-defined Official lit arguments and RAJAPerf arguments directly from `config.yml` into the run scripts.
+- I kept the design deliberately simple: arguments are configured as lists and passed through without shell parsing or extra suite-specific interpretation.
+- I recorded the normalized test selection in experiment metadata and wrote the actual arguments used into each run stamp.
+- I also simplified the workflow label model so the whole system now uses one global `label`, with timestamp generation when it is omitted.
+- I removed the old run-label and repeat-count configuration paths, which keeps provenance clearer and avoids multiple competing label concepts.
+- I changed report generation to embed Plotly directly in the HTML, so reports can be opened offline or in IDE previews without depending on the Plotly CDN.
+- I verified the updated DAG, metadata generation, parser filtering, and self-contained report generation.
