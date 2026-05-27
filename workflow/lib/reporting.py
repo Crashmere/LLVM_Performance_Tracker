@@ -152,5 +152,5 @@ def generate_pure_plotly_report(df: pd.DataFrame, output_file: Path | str) -> Pa
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.write_html(str(output_path), include_plotlyjs="cdn")
+    fig.write_html(str(output_path), include_plotlyjs=True)
     return output_path
