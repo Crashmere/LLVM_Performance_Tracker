@@ -3,6 +3,7 @@ project:
   base_dir: "~/msc/auto"
   # default_platform: "eidf-vm"
 
+# If the `label` is omitted, a timestamp label is generated automatically.
 # label: "baseline"
 
 build:
@@ -28,34 +29,20 @@ suite_defaults:
 
 test_selection:
   official:
-    lit_args: []
+    lit_args:
+      - "--filter"
+      - "TSVC"
   raja:
-    extra_args: []
+    extra_args:
+      - "--kernels"
+      - "Basic_DAXPY"
 
-
-# Test selection: subset/smoke example.
-# Comment out the `test_selection` block above and uncomment this block to use
-# a smaller benchmark subset. Use a distinct label for formal experiments
-# when switching between full and subset selections.
-#
-# test_selection:
-#   official:
-#     lit_args:
-#       - "--filter"
-#       - "TSVC"
-#   raja:
-#     extra_args:
-#       - "--kernels"
-#       - "Basic_DAXPY"
-#
 
 # Mode 1: simple matrix mode.
 # Leave `experiments` commented out to enable this mode.
 #
 # The workflow expands the cartesian product of:
 #   llvm.tags x test_suite.official.tags x test_suite.raja.tags
-#
-# If the top-level `label` is omitted, a timestamp label is generated automatically.
 
 llvm:
   tags:
