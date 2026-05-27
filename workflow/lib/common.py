@@ -30,6 +30,24 @@ def _ensure_list(value: Any, *, default: list[str] | None = None) -> list[str]:
     return [str(value)]
 
 
+def as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in list(value)]
+
+
+def _parse_string_list(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError(f"{field_name} must be a list of strings, got {type(value).__name__}.")
+    return [str(item) for item in value]
+
+
 def _slugify(value: Any) -> str:
     text = str(value).strip()
     slug = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
@@ -72,6 +90,42 @@ def _parse_bool(value: Any, field_name: str) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{field_name} must be a boolean, got {type(value).__name__}.")
     return value
+
+
+def normalize_test_selection(config: dict[str, Any]) -> dict[str, Any]:
+    raw_selection = config.get("test_selection", {})
+    if raw_selection is None:
+        raw_selection = {}
+    if not isinstance(raw_selection, dict):
+        raise TypeError(f"test_selection must be a mapping, got {type(raw_selection).__name__}.")
+
+    raw_official = raw_selection.get("official", {})
+    if raw_official is None:
+        raw_official = {}
+    if not isinstance(raw_official, dict):
+        raise TypeError(f"test_selection.official must be a mapping, got {type(raw_official).__name__}.")
+
+    raw_raja = raw_selection.get("raja", {})
+    if raw_raja is None:
+        raw_raja = {}
+    if not isinstance(raw_raja, dict):
+        raise TypeError(f"test_selection.raja must be a mapping, got {type(raw_raja).__name__}.")
+
+    return {
+        "profile": str(raw_selection.get("profile", "full")),
+        "official": {
+            "lit_args": _parse_string_list(
+                raw_official.get("lit_args", []),
+                "test_selection.official.lit_args",
+            ),
+        },
+        "raja": {
+            "extra_args": _parse_string_list(
+                raw_raja.get("extra_args", []),
+                "test_selection.raja.extra_args",
+            ),
+        },
+    }
 
 
 def _build_experiment_id(llvm_tag: str, official_tag: str, raja_tag: str, run_label: str) -> str:
@@ -199,6 +253,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     repositories = config["repositories"]
     compilers = config["compilers"]
     suite_defaults = config["suite_defaults"]
+    test_selection = normalize_test_selection(config)
     raw_experiments = config.get("experiments", [])
 
     if raw_experiments:
@@ -273,6 +328,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
                 "cxx_standard": str(suite_defaults["raja"]["cxx_standard"]),
             },
         },
+        "test_selection": test_selection,
         "experiments": experiments,
         "experiment_mode": experiment_mode,
     }

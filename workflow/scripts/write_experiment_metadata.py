@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.lib.common import load_config
+from workflow.lib.common import load_config, normalize_test_selection
 from workflow.lib.layout import get_experiment_layout_paths
 
 
@@ -68,6 +68,7 @@ def build_metadata(
     experiment_mode: str,
 ) -> dict[str, Any]:
     raw_config = load_config(config_file)
+    test_selection = normalize_test_selection(raw_config)
     layout = get_experiment_layout_paths(base_dir, experiment)
 
     return {
@@ -79,6 +80,7 @@ def build_metadata(
             "config_file": str(config_file.resolve()),
             "base_dir": str(base_dir.resolve()),
         },
+        "test_selection": test_selection,
         "paths": _path_map_to_strings(layout),
         "expected_outputs": {
             "llvm_checkout_stamp": str(layout["llvm_source"] / ".checkout_complete"),

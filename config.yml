@@ -24,6 +24,34 @@ suite_defaults:
   raja:
     cxx_standard: "17"
 
+test_selection:
+  profile: "full"
+
+  official:
+    lit_args: []
+
+  raja:
+    extra_args: []
+
+
+# Test selection: subset/smoke example.
+# Comment out the `test_selection` block above and uncomment this block to use
+# a smaller benchmark subset. Use a distinct run label for formal experiments
+# when switching between full and subset selections.
+#
+# test_selection:
+#   profile: "smoke"
+#
+#   official:
+#     lit_args:
+#       - "--filter"
+#       - "TSVC"
+#
+#   raja:
+#     extra_args:
+#       - "--kernels"
+#       - "Basic_DAXPY"
+#
 
 # Mode 1: simple matrix mode.
 # Leave `experiments` commented out to enable this mode.

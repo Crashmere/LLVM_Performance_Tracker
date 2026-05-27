@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import shutil
 import sys
 from datetime import datetime
@@ -11,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from workflow.lib.command_runner import CommandRunner
+from workflow.lib.common import as_string_list
 
 
 runner = CommandRunner.from_snakemake(snakemake)
@@ -31,6 +33,7 @@ def resolve_lit_executable() -> str:
 build_dir = Path(snakemake.params.build_dir)
 result_path = Path(snakemake.output.results)
 result_path.parent.mkdir(parents=True, exist_ok=True)
+lit_args = as_string_list(snakemake.params.lit_args)
 
 lit_exe = resolve_lit_executable()
 lit_cmd = [
@@ -38,6 +41,7 @@ lit_cmd = [
     "-v",
     "-o",
     str(result_path),
+    *lit_args,
     str(build_dir),
 ]
 
@@ -52,4 +56,5 @@ stamp_path = Path(snakemake.output.stamp)
 with open(stamp_path, "w", encoding="utf-8") as f:
     f.write(f"build_dir={build_dir}\n")
     f.write(f"results={result_path}\n")
+    f.write(f"lit_args={json.dumps(lit_args)}\n")
     f.write(f"completed_at={datetime.now().isoformat()}\n")

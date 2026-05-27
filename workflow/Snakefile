@@ -172,6 +172,7 @@ rule run_official:
         EXCLUSIVE_BENCHMARK_THREADS
     params:
         build_dir=lambda wildcards: str(BASE_DIR / "builds" / "official" / wildcards.official_tag / f"llvm-{wildcards.llvm_tag}"),
+        lit_args=WORKFLOW_CONFIG["test_selection"]["official"]["lit_args"],
     script:
         "scripts/run_official.py"
 
@@ -189,6 +190,7 @@ rule run_raja:
     params:
         exe=lambda wildcards: str(BASE_DIR / "builds" / "raja" / wildcards.raja_tag / f"llvm-{wildcards.llvm_tag}" / "bin" / "raja-perf.exe"),
         result_dir=lambda wildcards: str(BASE_DIR / "results" / f"raja-{wildcards.raja_tag}" / wildcards.llvm_tag / wildcards.run_label),
+        extra_args=WORKFLOW_CONFIG["test_selection"]["raja"]["extra_args"],
     script:
         "scripts/run_raja.py"
 
