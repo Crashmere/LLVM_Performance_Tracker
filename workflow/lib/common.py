@@ -112,7 +112,6 @@ def normalize_test_selection(config: dict[str, Any]) -> dict[str, Any]:
         raise TypeError(f"test_selection.raja must be a mapping, got {type(raw_raja).__name__}.")
 
     return {
-        "profile": str(raw_selection.get("profile", "full")),
         "official": {
             "lit_args": _parse_string_list(
                 raw_official.get("lit_args", []),
@@ -191,13 +190,11 @@ def _normalize_explicit_experiments(
         for run_label in experiment_runs:
             experiments.append(
                 {
-                    "name": raw_experiment.get("name"),
                     "llvm_tag": llvm_tag,
                     "official_tag": official_tag,
                     "raja_tag": raja_tag,
                     "run_label": run_label,
                     "platform": raw_experiment.get("platform", default_platform),
-                    "build_profile": raw_experiment.get("build_profile"),
                 }
             )
 
@@ -233,14 +230,12 @@ def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[st
         experiments.append(
             {
                 "experiment_id": experiment_id,
-                "name": raw_experiment.get("name"),
                 "llvm_tag": llvm_tag,
                 "llvm_version": llvm_version,
                 "official_tag": official_tag,
                 "raja_tag": raja_tag,
                 "run_label": run_label,
                 "platform": raw_experiment.get("platform"),
-                "build_profile": raw_experiment.get("build_profile"),
             }
         )
 

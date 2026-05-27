@@ -219,7 +219,7 @@
 
 4. 明确 source/build/install 缓存策略：
    - LLVM install 可按 `llvm_tag` 复用。
-   - Official/RAJA build 可按 `suite_tag + llvm_version (+ optional build profile)` 复用。
+   - Official/RAJA build 可按 `suite_tag + llvm_version` 复用。
    - 运行结果必须按 `run_label` 隔离。
 
 5. 设计重复实验接口：
@@ -231,7 +231,6 @@
 - `runs.repeat_count`
 - `project.default_platform`
 - `experiments[]`
-- `build_profile` 字段已预留在 experiment 元数据中，但尚未形成实际构建参数模型。
 
 ### 验收标准
 
@@ -387,7 +386,6 @@
    - `workflow/lib/cmake_build.py` 保持只负责通用 CMake/Ninja 执行流程。
    - 将 LLVM、Official、RAJA 的 CMake 参数生成函数从 `common.py` 移入 `workflow/lib/build_configs.py`。
    - 将 RAJA OpenMP 探测逻辑与 RAJA CMake 参数放在同一模块中，避免 `common.py` 承担 suite 细节。
-   - 如果 build profile 后续进入配置模型，配置归一化层只保留 profile 名称和参数覆盖；具体 CMake 参数仍由构建配置模块解释。
 
 5. 增加只读磁盘占用报告：
    - 提供 `tools/report_disk_usage.py` 或类似命令。
@@ -420,7 +418,7 @@
 ### 暂不纳入本阶段的内容
 
 - 不做自动磁盘阈值阻断，例如 `disk_soft_limit_gb`。这类功能涉及检查时机、文件系统选择和并发写入后的空间变化，后续确有需求再加入 preflight。
-- 不做“清理旧 install / 清理旧结果 / 清理旧日志”的自动策略。清理是破坏性操作，应等缓存布局、build profile 和正式数据归档规则稳定后再设计。
+- 不做“清理旧 install / 清理旧结果 / 清理旧日志”的自动策略。清理是破坏性操作，应等缓存布局和正式数据归档规则稳定后再设计。
 - 不在 Snakemake 之外实现资源调度器，避免重复 Snakemake 已有能力。
 
 ---
@@ -616,8 +614,6 @@
 
 ```yaml
 test_selection:
-  profile: "full"
-
   official:
     lit_args: []
 
@@ -631,7 +627,6 @@ test_selection:
 
 1. 配置归一化。
    - 在 `common.py` 的配置归一化结果中加入 `test_selection`。
-   - `test_selection.profile` 默认为 `full`。
    - `official.lit_args` 默认为空列表。
    - `raja.extra_args` 默认为空列表。
    - 明确只接受 list，不做字符串拆分，避免 shell quoting 歧义。
@@ -659,7 +654,7 @@ test_selection:
 5. Metadata。
    - `experiment.json` 中新增 `test_selection` 字段。
    - 记录 normalized selection，而不是只记录原始 config。
-   - 后续报告可根据该字段显示“full run / smoke run / custom args”。
+   - 后续报告可根据该字段显示本次使用的 Official/RAJA 参数。
 
 6. smoke 配置示例。
    - 在 `config.yml` 注释中提供一个可切换的 smoke 示例。
@@ -675,7 +670,7 @@ test_selection:
 - 使用 smoke 配置时，运行时间或输出规模明显小于 full run。
 - parsed / aggregate / report 仍能正常生成。
 
-### 阶段 5B：结构化子集选择和 profile 增强
+### 阶段 5B：结构化子集选择增强
 
 #### 目标
 
@@ -696,25 +691,19 @@ test_selection:
   - `problem_sizes`
   - 常用 RAJAPerf smoke 参数模板
 
-- 预定义 profile：
-  - `full`
-  - `smoke`
-  - `vectorization`
-  - `microbenchmarks`
-
 - 新增 `workflow/lib/test_selection.py`。
   - 当 selection 逻辑不再只是简单列表透传时，将配置解释和命令参数生成移入该模块。
   - run 脚本只接收已经生成好的参数列表，避免脚本里堆积 suite-specific 规则。
 
 - 报告展示增强。
-  - 在 HTML report 中显示当前 selection profile 和关键参数。
-  - 在 parsed/aggregated 表格中增加 selection 相关字段，便于后续跨 run 对比时过滤 full/smoke/custom run。
+  - 在 HTML report 中显示当前 Official/RAJA selection 参数。
+  - 在 parsed/aggregated 表格中增加 selection 相关字段，便于后续跨 run 对比时过滤 full/subset run。
 
 #### 阶段 5B 验收标准
 
 - 用户可以通过结构化配置只跑 TSVC 或只跑 RAJA 中的某类 kernels。
-- `smoke` profile 可以作为开发后的快速验证配置。
-- 报告中能看到这次结果基于哪个 profile 或参数子集生成。
+- 一组注释示例可以作为开发后的快速验证配置。
+- 报告中能看到这次结果基于哪些参数子集生成。
 - 不同 selection 的结果不会在 provenance 上混淆。
 
 ---

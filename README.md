@@ -425,14 +425,13 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
 - simple mode 现在只保留真正和矩阵展开有关的字段。
 - explicit mode 可以通过取消注释 `experiments` 切换。
 - repo URL、host compiler、suite 默认 C++ 标准都属于共享配置，不再混入 simple mode。
-- `name` 只存在于 explicit experiment 中，作为人工可读标签，不参与唯一性或路径生成。
 - `run_label` 仍然是结果目录隔离和重复实验标识的核心字段。
 
 #### 关于代码结构的结论
 
 - `command_runner.py`、`layout.py`、`cmake_build.py` 已从原先的重复脚本和 `common.py` 中拆出。
 - `common.py` 当前仍保留配置归一化、git 辅助和 suite-specific CMake 参数生成。
-- 后续阶段如果继续扩展 parser、reporting、build profile 或平台支持，应优先拆分：
+- 后续阶段如果继续扩展 parser、reporting 或平台支持，应优先拆分：
   - `workflow/lib/parsers/`
   - `workflow/lib/result_schema.py`
   - `workflow/lib/analysis.py`
