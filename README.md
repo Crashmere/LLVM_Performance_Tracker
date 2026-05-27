@@ -53,9 +53,7 @@ project:
   base_dir: "~/msc/auto"
 
 build:
-  ninja_jobs:
-    - "-j"
-    - "6"
+  ninja_jobs: 6
 
 llvm:
   repo_url: "https://github.com/llvm/llvm-project.git"
@@ -76,10 +74,10 @@ test_suite:
 
 当前实现支持两种配置模式：
 
-- 简单矩阵模式：对 `llvm.tags`、`test_suite.*.tags` 以及可选的 `runs.labels` 做笛卡尔展开。
-- 显式实验模式：通过 `experiments[]` 明确定义每个组合，并可对单个实验设置 `repeat_count`。
+- 简单矩阵模式：对 `llvm.tags` 和 `test_suite.*.tags` 做笛卡尔展开。
+- 显式实验模式：通过 `experiments[]` 明确定义每个组合。
 
-如果 `runs.labels` 未配置，系统会在运行时自动生成时间戳 `run_label`。这也是推荐的默认用法。只有在你需要手动命名某次运行或做一组固定命名的重复实验时，才需要显式写 `runs.labels`。
+全局 `label` 用来标识本次运行，并参与结果目录和 `experiment_id` 生成。如果未配置，系统会在运行时自动生成时间戳；如果需要手动命名一次实验，可以在配置公共部分写 `label: "baseline"`。
 
 ## 运行工作流
 
@@ -117,10 +115,10 @@ test_suite:
 
 默认目标是最终 HTML 报告：
 
-[`auto/reports/<experiment_id>/benchmark_report.html`](/home/eidf018/eidf018/s2778911-aspp/msc/auto/reports/llvm_llvmorg-21.1.0__official_llvmorg-21.1.0__raja_v2025.12.0__run_20260504_120000/benchmark_report.html)
+[`auto/reports/<experiment_id>/benchmark_report.html`](/home/eidf018/eidf018/s2778911-aspp/msc/auto/reports/llvm_llvmorg-21.1.0__official_llvmorg-21.1.0__raja_v2025.12.0__label_20260504_120000/benchmark_report.html)
 
 `run_official` 和 `run_raja` 被配置为独占所有可用 cores，因此 Snakemake 调度时不会并行执行 benchmark 运行任务，也不会让其它 CPU 密集型 job 与其并发。
-`build.ninja_jobs` 是所有 CMake/Ninja 构建步骤共享的并行度设置，当前推荐值为 `-j 6`。
+`build.ninja_jobs` 是所有 CMake/Ninja 构建步骤共享的并行度设置，当前推荐值为 `6`，脚本会负责转换成 Ninja 的 `-j 6`。
 
 ## 常用命令
 
@@ -147,9 +145,9 @@ test_suite:
 - LLVM install：
   `auto/installs/llvm/<llvm_tag>/`
 - Official 结果：
-  `auto/results/official-<official_tag>/<llvm_tag>/<run_label>/baseline_results.json`
+  `auto/results/official-<official_tag>/<llvm_tag>/<label>/baseline_results.json`
 - RAJA 结果：
-  `auto/results/raja-<raja_tag>/<llvm_tag>/<run_label>/RAJAPerf-kernel-run-data.csv`
+  `auto/results/raja-<raja_tag>/<llvm_tag>/<label>/RAJAPerf*.csv`
 - 解析结果：
   `auto/parsed/<experiment_id>/benchmark_records.csv`
 - 聚合结果：
@@ -174,25 +172,25 @@ test_suite:
 #### 背景与问题
 
 - 旧版 `Snakefile` 在顶层直接读取 `llvm.tags[0]`、`official.tags[0]`、`raja.tags[0]`，所以配置中的 tag 列表只是表面支持。
-- 原有路径布局主要围绕单个 `run_label` 设计，无法稳定区分多版本、多组合、多轮次实验。
-- `parse_results` 会扫描整个 `auto/results/`，如果后续进入矩阵实验，单靠 `run_label` 过滤不够精确。
+- 原有路径布局主要围绕单个运行标识设计，无法稳定区分多版本、多组合实验。
+- `parse_results` 会扫描整个 `auto/results/`，如果后续进入矩阵实验，必须结合 suite version、compiler version 和 `label` 精确过滤。
 - 构建并行参数原先挂在 `llvm.build.ninja_jobs` 下，但实际上会同时影响 LLVM、official 和 RAJA 三类构建，语义不够清楚。
 - benchmark 运行任务本身适合独占资源，不适合和其它 benchmark 任务并行。
 
 #### 主要设计决策
 
-- 保留 `run_label` 概念，但默认不要求在配置中手写；如果未配置 `runs.labels`，系统会在运行时自动生成时间戳。
+- 后续已将运行标识统一收敛为全局 `label`，默认不要求在配置中手写；如果未配置，系统会在运行时自动生成时间戳。
 - 在配置层支持两种实验定义方式：
-  - 简单矩阵模式：对 `llvm.tags`、`test_suite.*.tags` 和可选的 `runs.labels` 做展开。
+  - 简单矩阵模式：对 `llvm.tags` 和 `test_suite.*.tags` 做展开。
   - 显式实验模式：使用 `experiments[]` 精确列出需要的组合。
 - 为每个实验生成稳定的 `experiment_id`，让 `parsed/`、`reports/` 和实验级日志目录都按实验唯一隔离。
-- 构建缓存按 tag 复用，运行结果按 `run_label` 隔离。
+- 构建缓存按 tag 复用，运行结果按 `label` 隔离。
 - benchmark 运行 rule 通过 `threads` 独占当前可用 cores，避免并行运行 benchmark。
 
 #### 具体修改
 
 - `workflow/lib/common.py`
-  - 新增 `run_label` 归一化逻辑，支持自动时间戳、`runs.labels`、`repeat_count`。
+  - 新增运行标识归一化逻辑，当前已收敛为单一全局 `label`，支持未配置时自动时间戳。
   - 新增简单矩阵展开和显式实验展开逻辑。
   - 新增 `experiment_id` 生成与重复组合校验逻辑。
   - 将配置归一化结果升级为统一的 `experiments` 列表。
@@ -219,8 +217,8 @@ test_suite:
 - `config.yml`
   - 默认切换为简洁配置：
     - 使用新的 `build.ninja_jobs`
-    - 不再默认手写 `runs.labels`
-  - 保留注释示例，说明如何显式指定 `runs` 或 `experiments[]`。
+    - 不再默认手写 `label`
+  - 保留注释示例，说明如何显式指定 `label` 或 `experiments[]`。
 
 - 根目录新增 `run.sh`
   - 默认执行 `snakemake -s workflow/Snakefile -j 2`
@@ -239,15 +237,12 @@ test_suite:
 - 两者不会同时并列展开；显式实验模式优先。
 - 简单模式字段在显式模式下只作为默认值来源，不再作为矩阵展开源。
 
-#### 关于 `run_label` 和 `repeat_count`
+#### 关于 `label`
 
-- `run_label` 仍然有必要保留，因为它承担“单次运行标识”和“结果目录隔离”的作用。
-- 但现在推荐的主路径是不在配置中手写 `runs.labels`，让系统自动生成时间戳。
-- `repeat_count` 在配置归一化阶段生效，它不是在某个 rule 内部循环，而是先把一次实验展开成多个不同 `run_label` 的独立 experiment，例如：
-  - `baseline_repeat_01`
-  - `baseline_repeat_02`
-  - `baseline_repeat_03`
-- 不同 repeat 会复用源码和构建缓存，但会生成独立的 benchmark 结果、解析表和报告。
+- 当前系统只保留一个全局 `label`，它承担“本次运行标识”和“结果目录隔离”的作用。
+- 推荐默认不手写 `label`，让系统自动生成时间戳；正式实验如需固定命名，可以在配置公共部分写 `label: "baseline"`。
+- 旧的 `runs.labels`、`run_label`、`run_labels`、`repeat_count` 已移除，不再做向前兼容。
+- 如果未来要重新支持重复实验，应使用独立的 repeat/sample 模型，而不是重新引入多个 label 概念。
 
 #### 关于资源与调度的结论
 
@@ -282,13 +277,13 @@ test_suite:
 #### Commit Message
 
 Enable experiment matrix execution and clean up workflow defaults.
-Add experiment normalization, repeat expansion, experiment-scoped outputs, shared build concurrency settings, exclusive benchmark runs, and a simple run wrapper script.
+Add experiment normalization, experiment-scoped outputs, shared build concurrency settings, exclusive benchmark runs, and a simple run wrapper script.
 
 #### Weekly Update
 
 - This week I completed the first workflow upgrade for multi-version experiment support.
 - I updated the config normalization layer so the workflow now expands real experiment matrices instead of only using the first tag in each list.
-- I added support for repeated runs by expanding `repeat_count` into separate run labels and experiment IDs.
+- I added experiment normalization so matrix combinations are expanded into stable experiment IDs.
 - I updated result parsing so `parse_results` can filter by suite version, which makes matrix runs safer and avoids mixing data from different experiment combinations.
 - I moved the shared Ninja parallelism setting into a global build config and added a small `run.sh` wrapper to simplify normal execution and dry runs.
 - I also constrained benchmark execution rules so benchmark jobs do not run in parallel and compete for the same machine resources.
@@ -330,7 +325,7 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
     - expected outputs
     - log paths
     - hostname、kernel、Python version、Snakemake version 等轻量环境信息
-  - 为了避免自动时间戳 run label 在脚本内二次归一化时变化，metadata 脚本直接接收 `Snakefile` 传入的 normalized experiment JSON。
+  - 为了避免自动时间戳 `label` 在脚本内二次归一化时变化，metadata 脚本直接接收 `Snakefile` 传入的 normalized experiment JSON。
 
 - `tools/inspect_workflow_outputs.py`
   - 新增只读检查工具。
@@ -383,7 +378,7 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
 - `config.yml`
   - 将配置整理为真正的三段式结构：
     - 共享配置：`project`、`build`、`repositories`、`compilers`、`suite_defaults`
-    - simple mode：`runs`、`llvm.tags`、`test_suite.*.tags`
+    - simple mode：`label`、`llvm.tags`、`test_suite.*.tags`
     - explicit mode：注释掉的 `experiments`
   - `build.ninja_jobs` 从 `["-j", "6"]` 改为数字 `6`。
   - `suite_defaults` 改为按 suite 分别配置：
@@ -425,7 +420,7 @@ Add experiment normalization, repeat expansion, experiment-scoped outputs, share
 - simple mode 现在只保留真正和矩阵展开有关的字段。
 - explicit mode 可以通过取消注释 `experiments` 切换。
 - repo URL、host compiler、suite 默认 C++ 标准都属于共享配置，不再混入 simple mode。
-- `run_label` 仍然是结果目录隔离和重复实验标识的核心字段。
+- `label` 是结果目录隔离和实验标识的唯一标签字段；旧的 `run_label`、`runs.labels` 和 `repeat_count` 已移除。
 
 #### 关于代码结构的结论
 
@@ -585,7 +580,7 @@ Introduce experiment metadata outputs, a read-only output inspection tool, recov
 
 - `_shared` 日志路径由 `Snakefile` 中的 rule log 路径决定，是手写的目录约定，不是运行时自动推断。
 - checkout/build 产物本身会被多个 experiment 共享，因此它们的日志也放在 `logs/_shared/`。
-- run 日志包含 `run_label`，不是 shared。
+- run 日志包含 `label`，不是 shared。
 - parse、aggregate、report、metadata 按 `experiment_id` 隔离，也不是 shared。
 - shared log 后续重跑时可能被覆盖，因此不能当作某一次 experiment 的不可变日志快照。
 - 真正需要追溯某次完整 Snakemake 执行时，应结合 `.snakemake/log/<timestamp>.snakemake.log`。
@@ -688,11 +683,11 @@ Keep CMake build directories by default, add explicit clean/reconfigure controls
     - `extract_raja_records()`
     - `filter_records()`
   - 删除旧的 `__all__` 重导出。
-  - 目录扫描时会按 suite、suite version、compiler version、run label 预先过滤，避免不相关历史结果中的坏格式影响当前 experiment。
+  - 目录扫描时会按 suite、suite version、compiler version、label 预先过滤，避免不相关历史结果中的坏格式影响当前 experiment。
 
 - `workflow/scripts/parse_results_cli.py`
   - CLI 继续作为 Snakemake 的解析入口。
-  - 将 `--suite-version`、`--compiler-version`、`--run-label` 等过滤条件直接传给 `parse_results_directory()`。
+  - 将 `--suite-version`、`--compiler-version`、`--label` 等过滤条件直接传给 `parse_results_directory()`。
   - 不再先全量扫描再二次过滤。
 
 - `workflow/scripts/run_raja.py`

@@ -16,7 +16,7 @@ def parse_results_directory(
     base_dir: Path | str,
     suite_name: str | None = None,
     compiler_version: str | None = None,
-    run_label: str | None = None,
+    label: str | None = None,
     suite_versions: dict[str, str] | None = None,
 ) -> list[BenchmarkRecord]:
     base_path = Path(base_dir)
@@ -50,8 +50,8 @@ def parse_results_directory(
             for run_dir in compiler_dir.iterdir():
                 if not run_dir.is_dir():
                     continue
-                current_run_label = run_dir.name
-                if run_label and current_run_label != run_label:
+                current_label = run_dir.name
+                if label and current_label != label:
                     continue
 
                 if not any(run_dir.iterdir()):
@@ -66,7 +66,7 @@ def parse_results_directory(
                                 target_file,
                                 suite_version,
                                 compiler_ver,
-                                current_run_label,
+                                current_label,
                             )
                         )
                     else:
@@ -74,7 +74,7 @@ def parse_results_directory(
                 elif current_suite_name == "raja":
                     try:
                         all_records.extend(
-                            parse_raja_result_directory(run_dir, suite_version, compiler_ver, current_run_label)
+                            parse_raja_result_directory(run_dir, suite_version, compiler_ver, current_label)
                         )
                     except ParseError as exc:
                         raise ParseError(str(exc)) from exc

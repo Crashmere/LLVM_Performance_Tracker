@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-file", required=True, help="Output .csv or .parquet file path.")
     parser.add_argument("--suite-name", help="Optional suite filter, such as official or raja.")
     parser.add_argument("--compiler-version", help="Optional compiler version filter.")
-    parser.add_argument("--run-label", help="Optional run label filter.")
+    parser.add_argument("--label", help="Optional label filter.")
     parser.add_argument(
         "--suite-version",
         action="append",
@@ -49,7 +49,7 @@ def main() -> int:
         args.input_dir,
         suite_name=args.suite_name,
         compiler_version=args.compiler_version,
-        run_label=args.run_label,
+        label=args.label,
         suite_versions=suite_versions,
     )
     output_path = write_records_table(records, args.output_file)

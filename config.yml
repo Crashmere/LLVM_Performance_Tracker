@@ -3,6 +3,8 @@ project:
   base_dir: "~/msc/auto"
   # default_platform: "eidf-vm"
 
+# label: "baseline"
+
 build:
   ninja_jobs: 6
   clean_build: false
@@ -33,7 +35,7 @@ test_selection:
 
 # Test selection: subset/smoke example.
 # Comment out the `test_selection` block above and uncomment this block to use
-# a smaller benchmark subset. Use a distinct run label for formal experiments
+# a smaller benchmark subset. Use a distinct label for formal experiments
 # when switching between full and subset selections.
 #
 # test_selection:
@@ -51,13 +53,9 @@ test_selection:
 # Leave `experiments` commented out to enable this mode.
 #
 # The workflow expands the cartesian product of:
-#   llvm.tags x test_suite.official.tags x test_suite.raja.tags x runs.labels
+#   llvm.tags x test_suite.official.tags x test_suite.raja.tags
 #
-# If runs.labels is omitted, a timestamp run label is generated automatically.
-runs:
-  # labels:
-  #   - "baseline"
-  repeat_count: 1
+# If the top-level `label` is omitted, a timestamp label is generated automatically.
 
 llvm:
   tags:
@@ -80,11 +78,8 @@ test_suite:
 # experiments:
 #   - llvm_tag: "llvmorg-21.1.0"
 #     official_tag: "llvmorg-21.1.0"
-#     raja_tag: "v2025.12.0"
-#     run_label: "baseline"
+#     raja_tag: "v2025.03.0"
 #
 #   - llvm_tag: "llvmorg-21.1.0"
 #     official_tag: "llvmorg-21.1.0"
 #     raja_tag: "v2025.12.0"
-#     run_label: "baseline"
-#     repeat_count: 3

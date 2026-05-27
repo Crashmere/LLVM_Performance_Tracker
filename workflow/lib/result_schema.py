@@ -22,7 +22,7 @@ class BenchmarkRecord:
     suite_name: str
     suite_version: str
     compiler_version: str
-    run_label: str
+    label: str
     test_name: str
     status: str
     metrics: BenchmarkMetrics
@@ -58,7 +58,7 @@ def records_to_dataframe(records: list[BenchmarkRecord]) -> pd.DataFrame:
             "compiler_tag": record.compiler_tag,
             "compiler_version": record.compiler_version,
             "compiler_commit": record.compiler_commit,
-            "run_label": record.run_label,
+            "label": record.label,
             "platform": record.platform,
             "hostname": record.hostname,
             "test_name": record.test_name,

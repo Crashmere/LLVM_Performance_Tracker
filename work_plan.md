@@ -23,13 +23,13 @@
 
 - 已从单体 Python orchestration 迁移为 Snakemake DAG。
 - 已实现 LLVM、Official test-suite、RAJAPerf 的 checkout / build / run / parse / aggregate / report 全流程。
-- 已引入参数化目录布局，支持按 `llvm_tag`、suite tag、`run_label` 复用源码/构建/结果，并按 `experiment_id` 隔离解析结果、报告、元数据和实验级日志。
+- 已引入参数化目录布局，支持按 `llvm_tag`、suite tag、全局 `label` 复用源码/构建/结果，并按 `experiment_id` 隔离解析结果、报告、元数据和实验级日志。
 - 已能生成统一表格数据：
   - `auto/parsed/<experiment_id>/benchmark_records.csv`
   - `auto/parsed/<experiment_id>/benchmark_records_aggregated.csv`
 - 已能生成 Plotly HTML 报告：
   - `auto/reports/<experiment_id>/benchmark_report.html`
-- 已支持 simple matrix mode 和 explicit experiment mode，可以从配置展开多实验矩阵和重复运行标签。
+- 已支持 simple matrix mode 和 explicit experiment mode，可以从配置展开多实验矩阵；全局 `label` 统一标识本次运行，未配置时自动使用时间戳。
 - 已为每个 experiment 生成 `auto/metadata/<experiment_id>/experiment.json`，并提供只读 inspect 命令辅助查看已有产物。
 - 已通过 `run.sh` 固化常用入口：默认 `--keep-going`、`resume`、`strict`、`dry-run`、`inspect`。
 - 已验证 RAJA OpenMP 链接链路，采用 `libomp.so` 自动发现 + RPATH 的方案。
@@ -73,7 +73,7 @@
    目前只有聚合均值，没有“版本对版本”的差异分析引擎，也没有阈值过滤。
 
 8. 重复实验和统计显著性尚未形成闭环。
-   当前配置模型已支持 `repeat_count` 展开多个 run label，但系统还没有：
+   当前配置模型不再内置重复运行展开，只保留一个全局 `label`；未来如果要做重复实验，需要重新设计不会混淆 provenance 的统计样本模型：
    - 汇总均值/标准差/置信区间
    - t-test 或其他显著性分析
 
@@ -99,7 +99,7 @@
 - 将“原始结果解析”和“分析视图模型”分层，避免后续复杂分析都直接耦合在 CSV 上。
 - 为 Snakemake 提供 profile、cluster/HPC 运行说明和资源声明。
 - 继续明确“仅重跑失败版本/失败 suite”的推荐 Snakemake target 用法。
-- 增强从历史 experiment/run 重建派生产物的选择模型，例如按 metadata 条件选择 parsed/aggregated/report 输入。
+- 增强从历史 experiment 重建派生产物的选择模型，例如按 metadata 条件选择 parsed/aggregated/report 输入。
 - 增加数据清洗规则，自动识别异常值、空结果、编译失败和运行崩溃。
 - 持续整理 `workflow/lib/` 的模块边界，避免 `common.py` 再次变成混合配置、路径、构建和 suite 细节的工具箱。
 
@@ -186,7 +186,6 @@
 
 - 真正支持多版本矩阵展开。
 - 支持显式定义实验组合。
-- 支持多次重复运行。
 - 为每个组合生成独立目录和独立结果。
 
 ### 已修改/新增的代码或文件
@@ -198,19 +197,21 @@
 
 ### 已完成的具体修改
 
-1. 扩展配置结构，建议支持两种模式：
+1. 扩展配置结构，当前支持两种模式：
    - 简单模式：
      - `llvm.tags`
      - `test_suite.official.tags`
      - `test_suite.raja.tags`
-     - `runs.labels`
    - 显式实验矩阵模式：
      - `experiments:`
-       - 每项明确定义 `llvm_tag`、`official_tag`、`raja_tag`、`run_label`、可选平台和参数覆盖。
+       - 每项明确定义 `llvm_tag`、`official_tag`、`raja_tag`、可选平台和参数覆盖。
+   - 全局公共配置：
+     - `label`
+       - 统一标识本次运行；不配置时自动生成时间戳。
 
 2. 在 `common.py` 中新增配置归一化逻辑：
    - 统一生成实验列表。
-   - 校验 tag、run_label、组合重复项。
+   - 校验 tag、label、组合重复项。
    - 给每个实验分配稳定 ID。
 
 3. 在 `Snakefile` 中用 `expand()` 驱动最终目标：
@@ -220,15 +221,11 @@
 4. 明确 source/build/install 缓存策略：
    - LLVM install 可按 `llvm_tag` 复用。
    - Official/RAJA build 可按 `suite_tag + llvm_version` 复用。
-   - 运行结果必须按 `run_label` 隔离。
-
-5. 设计重复实验接口：
-   - 允许同一实验自动生成 `repeat_01`、`repeat_02`、`repeat_03`。
+   - 运行结果必须按全局 `label` 隔离。
 
 ### 已引入的配置字段
 
-- `runs.labels`
-- `runs.repeat_count`
+- `label`
 - `project.default_platform`
 - `experiments[]`
 
@@ -236,7 +233,7 @@
 
 - 同一命令可以一次性跑多个 LLVM 版本。
 - 多个版本共享已有 source/build/install，不重复 checkout 和全量重编。
-- 同一实验可重复执行 N 次并形成多份结果目录。
+- 同一配置下未显式设置 `label` 时，会用时间戳生成新的结果目录，避免覆盖上一次运行。
 
 ---
 
@@ -279,7 +276,7 @@
 
 1. 新增 experiment metadata 产物。
    - 建议路径：`auto/metadata/<experiment_id>/experiment.json`
-   - 内容包括：`experiment_id`、`llvm_tag`、`official_tag`、`raja_tag`、`run_label`、`platform`、关键输出路径、日志路径、配置快照、生成时间。
+   - 内容包括：`experiment_id`、`llvm_tag`、`official_tag`、`raja_tag`、`label`、`platform`、关键输出路径、日志路径、配置快照、生成时间。
    - 可选加入轻量环境信息：hostname、CPU 型号、kernel、Python 版本、Snakemake 版本。
 
 2. 在 `Snakefile` 中把 metadata 纳入 DAG。
@@ -522,7 +519,7 @@
    - `compiler_tag`
    - `compiler_version`
    - `compiler_commit`
-   - `run_label`
+   - `label`
    - `platform`
    - `hostname`
    - `source_file`
@@ -545,7 +542,7 @@
 - 当前已观察到的 RAJA `v2025.03.0` 旧/不同格式结果可以解析：
   - `RAJAPerf-timing-Average.csv`
 - `v2025.03.0` 这类 RAJA 运行不应因为缺少 `RAJAPerf-kernel-run-data.csv` 在 `run_raja` 阶段失败；如果解析仍不支持某种格式，应在 `parse_results` 阶段给出清晰错误。
-- `TimingAverageAdapter` 输出的 RAJA records 至少应包含 `suite_name`、`suite_version`、`compiler_version`、`run_label`、`test_name`、`exec_time`、`parser_adapter`、`source_file`。
+- `TimingAverageAdapter` 输出的 RAJA records 至少应包含 `suite_name`、`suite_version`、`compiler_version`、`label`、`test_name`、`exec_time`、`parser_adapter`、`source_file`。
 - `KernelRunDataAdapter` 保留现有 runtime、bandwidth、GFLOP/s、checksum 信息。
 - 对缺失字段会给 warning，不会整批解析失败。
 - 使用已有真实输出验证关键路径：
@@ -634,8 +631,8 @@ test_selection:
 2. Snakemake 参数传递。
    - `rule run_official` params 增加 `lit_args`。
    - `rule run_raja` params 增加 `extra_args`。
-   - 保持 run rule 输出路径不随参数自动变化；是否复用 run_label 由用户负责。
-   - 文档中提醒：同一个 `run_label` 下改变 selection 参数会覆盖或重用同一路径，因此正式实验应给不同 selection 使用不同 `run_label`。
+   - 保持 run rule 输出路径不随参数自动变化；是否复用 `label` 由用户负责。
+   - 文档中提醒：同一个 `label` 下改变 selection 参数会覆盖或重用同一路径，因此正式实验应给不同 selection 使用不同 `label`。
 
 3. Official run 脚本。
    - 当前命令：
@@ -771,7 +768,7 @@ test_selection:
    - 波动最大测试
 
 6. 扩展输入模型：
-   - 支持按 `experiment_id`、`run_label` 或 metadata 条件读取多个历史 parsed 文件
+   - 支持按 `experiment_id`、`label` 或 metadata 条件读取多个历史 parsed 文件
    - 或从 `results/` 中按条件重建比较输入
    - 明确区分“单次实验报告输入”和“跨 run 比较输入”
 
@@ -863,11 +860,11 @@ test_selection:
 
 ### 目标
 
-把当前的 `repeat_count` / `run_label` 机制从“能生成多次运行”推进到“能支持统计结论”，覆盖 Future Work 中的 repeated runs 和 significance testing。
+重新设计重复实验模型，把“多次运行”推进到“能支持统计结论”，覆盖 Future Work 中的 repeated runs 和 significance testing。
 
 ### 当前差距
 
-- 已支持通过 `repeat_count` 展开多个 run label，但聚合和报告还没有把这些重复运行组织成统计分析单元。
+- 当前系统只保留一个全局 `label`，没有内置重复运行展开；未来需要先定义清晰的 repeat/sample 标识，再把这些运行组织成统计分析单元。
 - 聚合只有 `mean/std/count`，且没有显著性判断。
 - 缺少环境稳定性记录，不利于解释噪声。
 
@@ -886,10 +883,10 @@ test_selection:
 
 ### 具体修改内容
 
-1. 提供重复实验配置：
-   - `repeat_count`
-   - `repeat_labels`
-   - `warmup_runs`
+1. 提供重复实验配置。
+   - 设计应避免重新引入多个标签概念。
+   - 如果需要自动生成多次运行，应使用独立的 repeat/sample 字段，而不是复用 `label`。
+   - 可考虑支持 `warmup_runs`。
 
 2. 记录噪声控制元数据：
    - CPU 型号
@@ -1002,7 +999,7 @@ test_selection:
    - 输出待跑列表
 
 2. 自动生成实验配置：
-   - 可生成新 `run_label`
+   - 可生成新的全局 `label`
    - 指定 baseline 比较版本
 
 3. CI/CRON 任务：

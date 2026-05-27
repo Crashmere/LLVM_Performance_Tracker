@@ -10,7 +10,7 @@ from typing import Any
 
 SUMMARY_FIELDS = [
     "experiment_id",
-    "run_label",
+    "label",
     "llvm_tag",
     "official_tag",
     "raja_tag",
@@ -55,7 +55,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
             records.append(
                 {
                     "experiment_id": metadata_file.parent.name,
-                    "run_label": "",
+                    "label": "",
                     "llvm_tag": "",
                     "official_tag": "",
                     "raja_tag": "",
@@ -76,7 +76,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
         shared_status = get_shared_dependency_status(outputs, paths)
         shared_ok = all(shared_status.values())
         official_ok = exists(outputs.get("official_results"))
-        raja_ok = exists(outputs.get("raja_run_stamp")) or exists(outputs.get("raja_results"))
+        raja_ok = exists(outputs.get("raja_run_stamp"))
         parsed_ok = exists(outputs.get("parsed_csv"))
         aggregated_ok = exists(outputs.get("aggregated_csv"))
         report_ok = exists(outputs.get("report_html"))
@@ -84,7 +84,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
         records.append(
             {
                 "experiment_id": experiment.get("experiment_id", metadata_file.parent.name),
-                "run_label": experiment.get("run_label", ""),
+                "label": experiment.get("label", ""),
                 "llvm_tag": experiment.get("llvm_tag", ""),
                 "official_tag": experiment.get("official_tag", ""),
                 "raja_tag": experiment.get("raja_tag", ""),

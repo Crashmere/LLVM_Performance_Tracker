@@ -19,7 +19,7 @@ class OfficialJsonAdapter(ResultParser):
         path: Path,
         suite_version: str,
         compiler_ver: str,
-        run_label: str,
+        label: str,
     ) -> list[BenchmarkRecord]:
         raw_tests = parse_llvm_json(path)
         records: list[BenchmarkRecord] = []
@@ -44,7 +44,7 @@ class OfficialJsonAdapter(ResultParser):
                     suite_version=suite_version,
                     compiler_version=compiler_ver,
                     compiler_tag=compiler_ver,
-                    run_label=run_label,
+                    label=label,
                     test_name=test.get("name", "Unknown_Test"),
                     status=test.get("code", "UNKNOWN"),
                     metrics=metrics,
