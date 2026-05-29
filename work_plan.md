@@ -673,16 +673,45 @@ test_selection:
 
 在阶段 5A 的参数透传稳定后，再把常用选择方式封装成更友好的结构化配置，减少用户直接记忆 suite 命令行参数的负担。
 
+#### 当前第一层实现方向
+
+阶段 5B 第一层只做轻量结构化选择层，不引入完整 DSL。
+
+当前设计是新增 `workflow/lib/test_selection.py`，由它负责把结构化字段和原始透传参数合并成最终命令行参数。`run_official.py` 和 `run_raja.py` 仍然只接收已经解析好的参数列表，不在 run 脚本里堆积 suite-specific 解释逻辑。
+
+第一层支持：
+
+```yaml
+test_selection:
+  official:
+    filters:
+      - "TSVC"
+    exclude_filters: []
+    lit_args: []
+
+  raja:
+    kernels:
+      - "Basic_DAXPY"
+    extra_args: []
+```
+
+归一化后会生成：
+
+- `test_selection.official.resolved_lit_args`
+  - 例如 `["--filter", "TSVC"]`
+- `test_selection.raja.resolved_extra_args`
+  - 例如 `["--kernels", "Basic_DAXPY"]`
+
+原始 `lit_args` / `extra_args` 继续保留为 escape hatch，用于暂未结构化支持的上游参数。
+
 #### 后续可完善功能
 
 - Official 结构化选择：
   - `test_paths`
-  - `benchmark_filter`
-  - `exclude_patterns`
+  - 更友好的 benchmark group 模板
   - 常用 lit filter 的配置模板
 
 - RAJA 结构化选择：
-  - `kernels`
   - `kernel_groups`
   - `variants`
   - `problem_sizes`

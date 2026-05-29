@@ -15,8 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.lib.common import load_config, normalize_test_selection
+from workflow.lib.common import load_config
 from workflow.lib.layout import get_experiment_layout_paths
+from workflow.lib.test_selection import normalize_test_selection
 
 
 def parse_args() -> argparse.Namespace:

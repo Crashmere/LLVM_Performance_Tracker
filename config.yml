@@ -29,13 +29,13 @@ suite_defaults:
 
 test_selection:
   official:
-    lit_args:
-      - "--filter"
+    filters:
       - "TSVC"
+    lit_args: []
   raja:
-    extra_args:
-      - "--kernels"
+    kernels:
       - "Basic_DAXPY"
+    extra_args: []
 
 
 # Mode 1: simple matrix mode.
