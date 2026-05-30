@@ -904,3 +904,28 @@ Pass Official lit arguments and RAJAPerf extra arguments through the Snakemake r
 - I removed the old run-label and repeat-count configuration paths, which keeps provenance clearer and avoids multiple competing label concepts.
 - I changed report generation to embed Plotly directly in the HTML, so reports can be opened offline or in IDE previews without depending on the Plotly CDN.
 - I verified the updated DAG, metadata generation, parser filtering, and self-contained report generation.
+
+### 阶段五 B：常用测试选择参数结构化
+
+这一阶段在保留阶段五 A 原生参数透传能力的基础上，为常用测试范围增加了更直观的结构化配置。
+
+- Official 新增 `test_selection.official.filters` 和 `excluded`，归一化时转换为 lit 的 `--filter` 和 `--filter-out` 参数。
+- RAJA 新增 `test_selection.raja.kernels` 和 `excluded`，归一化时转换为 RAJAPerf 的 `--kernels` 和 `--exclude-kernels` 参数。
+- inclusion 和 `excluded` 可以同时配置，用于先选择较大的测试组，再排除其中少数不需要运行的测试。
+- 原有 `official.lit_args` 和 `raja.extra_args` 继续保留，作为未结构化参数的直接透传入口。
+- 新增 `workflow/lib/test_selection.py`，集中负责 selection 配置校验、归一化和最终参数拼装。
+- metadata 同时记录结构化配置和最终传给工具的 resolved 参数，便于核对实际运行范围。
+- 当前不根据 selection 自动修改结果目录；切换测试范围时仍建议使用不同的全局 `label`。
+
+#### Commit Message
+
+Add structured test selection configuration.
+Introduce structured Official filters and RAJAPerf kernel selection and exclusion while preserving raw argument passthrough for advanced use cases.
+
+#### Weekly Update
+
+- This week I added structured configuration for common benchmark selection options.
+- Official and RAJAPerf test selection now support direct inclusion and exclusion fields.
+- Inclusion and exclusion can be combined to select a broad benchmark group while skipping individual tests or kernels.
+- I kept the raw argument fields as escape hatches for options that do not yet need dedicated configuration.
+- I moved selection normalization into a dedicated module and recorded both configured and resolved arguments in experiment metadata.
