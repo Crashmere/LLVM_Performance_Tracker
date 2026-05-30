@@ -27,8 +27,8 @@ def _build_official_lit_args(raw_official: dict[str, Any]) -> list[str]:
         lit_args.extend(["--filter", pattern])
 
     for pattern in _parse_string_list(
-        raw_official.get("exclude_filters", []),
-        "test_selection.official.exclude_filters",
+        raw_official.get("excluded", []),
+        "test_selection.official.excluded",
     ):
         lit_args.extend(["--filter-out", pattern])
 
@@ -50,6 +50,13 @@ def _build_raja_extra_args(raw_raja: dict[str, Any]) -> list[str]:
     )
     if kernels:
         extra_args.extend(["--kernels", *kernels])
+
+    excluded = _parse_string_list(
+        raw_raja.get("excluded", []),
+        "test_selection.raja.excluded",
+    )
+    if excluded:
+        extra_args.extend(["--exclude-kernels", *excluded])
 
     extra_args.extend(
         _parse_string_list(
@@ -73,9 +80,9 @@ def normalize_test_selection(config: dict[str, Any]) -> dict[str, Any]:
         raw_official.get("lit_args", []),
         "test_selection.official.lit_args",
     )
-    official_exclude_filters = _parse_string_list(
-        raw_official.get("exclude_filters", []),
-        "test_selection.official.exclude_filters",
+    official_excluded = _parse_string_list(
+        raw_official.get("excluded", []),
+        "test_selection.official.excluded",
     )
     raja_kernels = _parse_string_list(
         raw_raja.get("kernels", []),
@@ -85,16 +92,21 @@ def normalize_test_selection(config: dict[str, Any]) -> dict[str, Any]:
         raw_raja.get("extra_args", []),
         "test_selection.raja.extra_args",
     )
+    raja_excluded = _parse_string_list(
+        raw_raja.get("excluded", []),
+        "test_selection.raja.excluded",
+    )
 
     return {
         "official": {
             "filters": official_filters,
-            "exclude_filters": official_exclude_filters,
+            "excluded": official_excluded,
             "lit_args": official_lit_args,
             "resolved_lit_args": _build_official_lit_args(raw_official),
         },
         "raja": {
             "kernels": raja_kernels,
+            "excluded": raja_excluded,
             "extra_args": raja_extra_args,
             "resolved_extra_args": _build_raja_extra_args(raw_raja),
         },

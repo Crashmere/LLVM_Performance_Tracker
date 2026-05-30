@@ -686,12 +686,13 @@ test_selection:
   official:
     filters:
       - "TSVC"
-    exclude_filters: []
+    excluded: []
     lit_args: []
 
   raja:
     kernels:
       - "Basic_DAXPY"
+    excluded: []
     extra_args: []
 ```
 
@@ -703,6 +704,8 @@ test_selection:
   - 例如 `["--kernels", "Basic_DAXPY"]`
 
 原始 `lit_args` / `extra_args` 继续保留为 escape hatch，用于暂未结构化支持的上游参数。
+
+Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 lit 的 `--filter-out`，RAJA 会转换为 RAJAPerf 的 `--exclude-kernels`。
 
 #### 后续可完善功能
 
