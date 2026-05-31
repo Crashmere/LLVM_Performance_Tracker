@@ -75,6 +75,18 @@ def _parse_positive_int(value: Any, field_name: str) -> int:
     return parsed
 
 
+def _parse_nonnegative_float(value: Any, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise TypeError(f"{field_name} must be a non-negative number, got boolean.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{field_name} must be a non-negative number.") from exc
+    if parsed < 0:
+        raise ValueError(f"{field_name} must be non-negative.")
+    return parsed
+
+
 def _normalize_samples(config: dict[str, Any]) -> list[str]:
     raw_samples = config.get("samples", {})
     if raw_samples is None:
@@ -210,6 +222,11 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     raw_experiments = config.get("experiments", [])
     label = _normalize_label(config.get("label"))
     samples = _normalize_samples(config)
+    analysis = config.get("analysis", {})
+    if analysis is None:
+        analysis = {}
+    if not isinstance(analysis, dict):
+        raise TypeError(f"analysis must be a mapping, got {type(analysis).__name__}.")
 
     if raw_experiments:
         llvm_tags: list[str] = []
@@ -261,6 +278,13 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
         "samples": {
             "count": len(samples),
             "names": samples,
+        },
+        "analysis": {
+            "change_threshold_percent": _parse_nonnegative_float(
+                analysis.get("change_threshold_percent", 5.0),
+                "analysis.change_threshold_percent",
+            ),
+            "min_samples": _parse_positive_int(analysis.get("min_samples", 2), "analysis.min_samples"),
         },
         "llvm": {
             "repo_url": repositories["llvm"],

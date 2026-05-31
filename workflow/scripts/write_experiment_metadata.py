@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import platform
 import socket
 import subprocess
@@ -51,14 +52,43 @@ def collect_environment() -> dict[str, Any]:
                 cpu_model = value.strip()
                 break
 
+    mem_total_kib = None
+    meminfo = Path("/proc/meminfo")
+    if meminfo.exists():
+        for line in meminfo.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("MemTotal:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    mem_total_kib = int(parts[1])
+                break
+
+    load_average = None
+    try:
+        load_average = list(os.getloadavg())
+    except OSError:
+        pass
+
     return {
         "hostname": socket.gethostname(),
         "platform": platform.platform(),
         "kernel": platform.release(),
         "machine": platform.machine(),
         "cpu_model": cpu_model,
+        "cpu_count": os.cpu_count(),
+        "load_average": load_average,
+        "memory_total_kib": mem_total_kib,
         "python_version": platform.python_version(),
         "snakemake_version": _command_output([sys.executable, "-m", "snakemake", "--version"]),
+        "openmp_environment": {
+            key: os.environ.get(key)
+            for key in [
+                "OMP_NUM_THREADS",
+                "OMP_PROC_BIND",
+                "OMP_PLACES",
+                "OMP_SCHEDULE",
+                "OMP_DYNAMIC",
+            ]
+        },
     }
 
 
@@ -99,6 +129,12 @@ def build_metadata(
             "aggregated_csv": str(layout["parsed_run_dir"] / "benchmark_records_aggregated.csv"),
             "report_html": str(layout["reports_run_dir"] / "benchmark_report.html"),
             "metadata_json": str(layout["metadata_run_dir"] / "experiment.json"),
+            "analysis_records": str(base_dir / "analysis" / "analysis_records.csv"),
+            "sample_statistics": str(base_dir / "analysis" / "sample_statistics.csv"),
+            "metric_comparisons": str(base_dir / "analysis" / "metric_comparisons.csv"),
+            "top_regressions": str(base_dir / "analysis" / "top_regressions.csv"),
+            "top_improvements": str(base_dir / "analysis" / "top_improvements.csv"),
+            "analysis_summary": str(base_dir / "analysis" / "analysis_summary.json"),
         },
         "logs": {
             "parse_results": str(layout["logs_run_dir"] / "parse_results.log"),

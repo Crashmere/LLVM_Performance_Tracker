@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import shlex
 import sys
 
 
@@ -30,6 +31,24 @@ FINAL_REPORTS = [
     str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["reports_run_dir"] / "benchmark_report.html")
     for experiment in EXPERIMENTS
 ]
+CURRENT_AGGREGATED = [
+    str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["parsed_run_dir"] / "benchmark_records_aggregated.csv")
+    for experiment in EXPERIMENTS
+]
+HISTORICAL_AGGREGATED = [
+    str(path)
+    for path in sorted((BASE_DIR / "parsed").glob("*/benchmark_records_aggregated.csv"))
+]
+ANALYSIS_INPUTS = sorted(set(CURRENT_AGGREGATED).union(HISTORICAL_AGGREGATED))
+ANALYSIS_DIR = BASE_DIR / "analysis"
+ANALYSIS_OUTPUTS = {
+    "analysis_records": str(ANALYSIS_DIR / "analysis_records.csv"),
+    "sample_statistics": str(ANALYSIS_DIR / "sample_statistics.csv"),
+    "metric_comparisons": str(ANALYSIS_DIR / "metric_comparisons.csv"),
+    "top_regressions": str(ANALYSIS_DIR / "top_regressions.csv"),
+    "top_improvements": str(ANALYSIS_DIR / "top_improvements.csv"),
+    "analysis_summary": str(ANALYSIS_DIR / "analysis_summary.json"),
+}
 
 LLVM_TAGS = sorted({str(experiment["llvm_tag"]) for experiment in EXPERIMENTS})
 OFFICIAL_TAGS = sorted({str(experiment["official_tag"]) for experiment in EXPERIMENTS})
@@ -47,6 +66,7 @@ def layout_from_experiment_id(experiment_id):
 rule all:
     input:
         FINAL_REPORTS,
+        ANALYSIS_OUTPUTS["analysis_summary"],
 
 
 rule checkout_llvm:
@@ -261,6 +281,35 @@ rule aggregate_results:
         "--input-file {input.parsed_csv} --output-file {output.aggregated_csv} > {log} 2>&1"
 
 
+rule build_analysis_dataset:
+    input:
+        aggregated_csvs=ANALYSIS_INPUTS,
+    output:
+        analysis_records=ANALYSIS_OUTPUTS["analysis_records"],
+        sample_statistics=ANALYSIS_OUTPUTS["sample_statistics"],
+        metric_comparisons=ANALYSIS_OUTPUTS["metric_comparisons"],
+        top_regressions=ANALYSIS_OUTPUTS["top_regressions"],
+        top_improvements=ANALYSIS_OUTPUTS["top_improvements"],
+        analysis_summary=ANALYSIS_OUTPUTS["analysis_summary"],
+    log:
+        str(BASE_DIR / "logs" / "_analysis" / "build_analysis_dataset.log"),
+    params:
+        base_dir=str(BASE_DIR),
+        output_dir=str(ANALYSIS_DIR),
+        threshold_percent=WORKFLOW_CONFIG["analysis"]["change_threshold_percent"],
+        min_samples=WORKFLOW_CONFIG["analysis"]["min_samples"],
+        input_args=lambda wildcards, input: " ".join(
+            f"--input-file {shlex.quote(path)}" for path in input.aggregated_csvs
+        ),
+    shell:
+        ".venv/bin/python workflow/scripts/build_analysis_dataset.py "
+        "--base-dir {params.base_dir} "
+        "{params.input_args} "
+        "--output-dir {params.output_dir} "
+        "--threshold-percent {params.threshold_percent} "
+        "--min-samples {params.min_samples} > {log} 2>&1"
+
+
 rule generate_report:
     input:
         aggregated_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records_aggregated.csv"),
@@ -271,4 +320,5 @@ rule generate_report:
         str(BASE_DIR / "logs" / "{experiment_id}" / "generate_report.log"),
     shell:
         ".venv/bin/python workflow/scripts/generate_report_cli.py "
-        "--input-file {input.aggregated_csv} --output-html {output.html} > {log} 2>&1"
+        "--input-file {input.aggregated_csv} "
+        "--output-html {output.html} > {log} 2>&1"

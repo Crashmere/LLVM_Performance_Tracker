@@ -60,16 +60,14 @@
 4. 测试子集选择功能尚未实现。
    报告和 work plan 都明确提到要支持用户控制测试范围，以减少运行时间、输出体积和资源消耗。
 
-5. 全量历史结果分析能力还不完整。
-   当前可以通过 Snakemake target 从已有原始结果重建派生产物，也能通过 inspect 查看 metadata-backed experiment，但系统仍缺少默认扫描 `auto/` 中全部可用 aggregated 结果并构建统一 analysis dataset 的能力。
+5. 全量历史结果分析能力已有基础闭环。
+   当前主流水线已经可以扫描 `auto/` 中保留的可用 aggregated 结果并构建统一 analysis dataset；后续重点应放在更好的可视化呈现和更细的对比视图上。
 
 6. 可视化还处于演示版。
    当前图表固定、过滤能力弱，尚未支持 kernel 级交互、对比模式、差异高亮、失败结果展示等。
 
-7. 自动性能变化检测、重复实验和统计显著性尚未形成闭环。
-   目前只有单张 parsed 表内的基础均值聚合，没有“版本对版本”的差异分析引擎，也没有阈值过滤。当前配置模型不再内置重复运行展开，只保留一个全局 `label`；后续需要设计不会混淆 provenance 的统计样本模型：
-   - 汇总均值/标准差/置信区间
-   - t-test 或其他显著性分析
+7. 自动性能变化检测已有轻量实现。
+   当前系统已经能基于全量 analysis dataset 做阈值过滤、样本统计和候选 regression / improvement 分类；复杂显著性检验暂不作为主线需求，避免在报告系统成熟前引入过重的统计分支。
 
 8. HPC 环境可移植性支持仍不完整。
    报告计划中包括 EIDF VM 与 ARCHER2 的可移植性验证，但当前工作流没有显式环境抽象、模块加载层或平台配置层。
@@ -737,18 +735,17 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 落实报告中的 Task 3.1 和 Future Work 中的 repeated runs / significance testing，但不另起一套独立的文字报告系统。
 
-阶段六的目标是为最终 HTML report 构建 report-ready analysis layer：
+阶段六的目标是为后续 HTML report 构建 report-ready analysis data layer：
 
-- Snakemake 主流水线完成 benchmark、parse、aggregate、analysis、report 全部工作。
+- Snakemake 主流水线完成 benchmark、parse、aggregate、analysis 数据生成。
 - 系统默认扫描并分析当前 `auto/` 中保留下来的全部可用结果。
 - 用户如果不希望某些结果进入分析，应删除对应产物，而不是通过复杂命令手工筛选。
-- analysis layer 产出结构化数据表，供阶段七的 HTML report 直接消费。
+- analysis layer 只产出结构化 CSV/JSON；HTML 读取和展示放到阶段七。
 
 ### 当前差距
 
 - `workflow/lib/reporting.py` 只能对单张 parsed 表中的重复记录做基础 `mean/std/count` 聚合。
 - 尚无统一的全量 analysis dataset。
-- HTML report 目前只消费单个 experiment 的 aggregated CSV，缺少跨版本、跨 label、跨 sample 的分析输入。
 - 尚无版本间差异计算、阈值过滤、回归/改善榜单。
 - 当前系统只保留一个全局 `label`，还需要独立的 sample 维度支撑重复实验。
 - 缺少样本统计、置信区间和显著性证据，不利于区分真实性能变化与噪声。
@@ -758,7 +755,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 增加独立的重复实验 sample 模型。
 - 将相同配置的多次运行组织成可分析的统计样本组。
 - 自动扫描 `auto/parsed/*/benchmark_records_aggregated.csv` 中全部可用结果。
-- 生成统一的 analysis dataset，作为 HTML report 的数据输入。
+- 生成统一的 analysis dataset，作为阶段七 HTML report 的数据输入。
 - 自动计算改善和回归，并区分候选变化与统计上可信的变化。
 - 支持用户设定显著变化阈值。
 - 生成可供 HTML report 可视化消费的结构化分析表。
@@ -767,12 +764,9 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 - 新增：
   - `workflow/lib/analysis.py`
-  - `workflow/lib/statistics.py`
   - `workflow/scripts/build_analysis_dataset.py`
 - 修改：
   - `workflow/Snakefile`
-  - `workflow/lib/reporting.py`
-  - `workflow/scripts/generate_report_cli.py`
 
 ### 具体修改内容
 
@@ -822,31 +816,30 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - `sample`
    - `value`
 
-#### 阶段 6C：report-ready 可靠变化分析
+#### 阶段 6C：report-ready 变化分析
 
-1. 基于全量 analysis dataset 扩展统计分析：
+1. 基于全量 analysis dataset 扩展轻量统计分析：
    - 均值
    - 标准差
    - 变异系数
    - 置信区间
-   - t-test / Mann-Whitney 等简单检验
 
 2. 对比时区分：
    - 单次观测或样本不足时的候选变化
    - 超过阈值但统计证据不足的变化
-   - 统计上显著的 regression / improvement
+   - 置信区间不重叠且样本数足够时的相对可靠 regression / improvement
 
-3. 所有分析结果都作为 HTML report 输入，而不是另起命令生成独立文字报告。
-4. `reporting.py` 只负责渲染；差异计算、样本聚合和统计检验放在 `analysis.py` / `statistics.py` 中。
+3. 所有分析结果都写成结构化 CSV/JSON，而不是另起命令生成独立文字报告。
+4. 差异计算、样本聚合和轻量统计判断放在 `analysis.py` 中；`reporting.py` 暂不读取这些数据。
 
 ### 验收标准
 
-- 用户只需运行主 Snakemake 流水线即可得到 benchmark、analysis 和 HTML report。
+- 用户只需运行主 Snakemake 流水线即可得到 benchmark、analysis 数据和现有 HTML report。
 - 系统默认分析当前 `auto/` 中保留下来的全部可用 aggregated 结果。
 - 用户可以通过配置展开同一实验组的多个 sample。
 - 同一版本的多轮结果可被自动识别为同一个统计样本组。
-- HTML report 能展示候选变化、噪声波动和统计上可信的变化。
 - 阶段六产出的分析表可以直接支撑阶段七的可视化报告。
+- 第六阶段不实现 HTML 展示，不让 `generate_report_cli.py` 读取 analysis 数据。
 
 ---
 
@@ -868,7 +861,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 改进静态 HTML 报告。
 - 增加交互过滤和多视图展示。
 - 如果时间允许，再追加轻量 Web App。
-- 将阶段六的全量 analysis dataset 渲染成最终 HTML report。
+- 将阶段六的全量 analysis dataset 接入并渲染成最终 HTML report。
 - 保持单一 Snakemake 主流水线；不要引入额外 `run.sh report` 或复杂手工选择入口作为主线。
 
 ### 需要修改/新增的代码或文件

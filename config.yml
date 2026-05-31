@@ -15,6 +15,10 @@ build:
   clean_build: false
   reconfigure: true
 
+analysis:
+  change_threshold_percent: 5.0
+  min_samples: 2
+
 repositories:
   llvm: "https://github.com/llvm/llvm-project.git"
   official: "https://github.com/llvm/llvm-test-suite.git"
