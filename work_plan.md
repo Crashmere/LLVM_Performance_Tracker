@@ -848,6 +848,26 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 线程数
    - OpenMP 环境变量
 
+#### 当前阶段 6B 实现
+
+- 新增全局配置：
+  - `samples.count`
+  - 默认值为 `1`
+  - `count=3` 时展开为 `sample_1`、`sample_2`、`sample_3`
+- `label` 继续表示实验组，`sample` 表示同一实验组中的独立观测。
+- `experiment_id` 现在包含 sample 段，例如：
+  - `...__label_<label>__sample_1`
+- 原始结果路径变为：
+  - `auto/results/official-<official_tag>/<llvm_tag>/<label>/<sample>/`
+  - `auto/results/raja-<raja_tag>/<llvm_tag>/<label>/<sample>/`
+- run log 路径同步加入 `<sample>`。
+- `experiment.json` 中写入 `experiment.sample`，metadata 的 expected output 和 log path 也指向 sample 目录。
+- parsed 和 aggregated 表新增 `sample` 列。
+- 常规 `aggregate_results` 保留 sample 边界，不跨 sample 自动求统计量。
+- `parse_results_cli.py` 新增 `--sample` 过滤参数。
+- `inspect` 输出新增 `sample` 列。
+- 使用说明见 `docs/samples.md`。
+
 #### 阶段 6C：可靠回归检测
 
 1. 扩展统计分析输出：

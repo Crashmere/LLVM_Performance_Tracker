@@ -112,6 +112,7 @@ def build_metadata(
                 / str(experiment["official_tag"])
                 / str(experiment["llvm_tag"])
                 / str(experiment["label"])
+                / str(experiment["sample"])
                 / "run_official.log"
             ),
             "run_raja": str(
@@ -122,6 +123,7 @@ def build_metadata(
                 / str(experiment["raja_tag"])
                 / str(experiment["llvm_tag"])
                 / str(experiment["label"])
+                / str(experiment["sample"])
                 / "run_raja.log"
             ),
         },

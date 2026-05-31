@@ -21,6 +21,7 @@ exe_path = Path(snakemake.params.exe)
 result_dir = Path(snakemake.params.result_dir)
 result_dir.mkdir(parents=True, exist_ok=True)
 extra_args = as_string_list(snakemake.params.extra_args)
+sample = str(snakemake.params.sample)
 
 success = runner.run([str(exe_path), *extra_args], cwd=result_dir)
 if not success:
@@ -34,6 +35,7 @@ stamp_path = Path(snakemake.output.stamp)
 with open(stamp_path, "w", encoding="utf-8") as f:
     f.write(f"executable={exe_path}\n")
     f.write(f"result_dir={result_dir}\n")
+    f.write(f"sample={sample}\n")
     f.write(f"extra_args={json.dumps(extra_args)}\n")
     for result_file in result_files:
         f.write(f"result_file={result_file}\n")

@@ -17,6 +17,7 @@ def parse_results_directory(
     suite_name: str | None = None,
     compiler_version: str | None = None,
     label: str | None = None,
+    sample: str | None = None,
     suite_versions: dict[str, str] | None = None,
 ) -> list[BenchmarkRecord]:
     base_path = Path(base_dir)
@@ -47,39 +48,53 @@ def parse_results_directory(
             if compiler_version and compiler_ver != compiler_version:
                 continue
 
-            for run_dir in compiler_dir.iterdir():
-                if not run_dir.is_dir():
+            for label_dir in compiler_dir.iterdir():
+                if not label_dir.is_dir():
                     continue
-                current_label = run_dir.name
+                current_label = label_dir.name
                 if label and current_label != label:
                     continue
 
-                if not any(run_dir.iterdir()):
-                    logging.info("Skipping empty run directory: %s", run_dir)
-                    continue
+                for sample_dir in label_dir.iterdir():
+                    if not sample_dir.is_dir():
+                        continue
+                    current_sample = sample_dir.name
+                    if sample and current_sample != sample:
+                        continue
 
-                if current_suite_name == "official":
-                    target_file = run_dir / "baseline_results.json"
-                    if target_file.exists():
-                        all_records.extend(
-                            OfficialJsonAdapter().parse(
-                                target_file,
-                                suite_version,
-                                compiler_ver,
-                                current_label,
+                    if not any(sample_dir.iterdir()):
+                        logging.info("Skipping empty run directory: %s", sample_dir)
+                        continue
+
+                    if current_suite_name == "official":
+                        target_file = sample_dir / "baseline_results.json"
+                        if target_file.exists():
+                            all_records.extend(
+                                OfficialJsonAdapter().parse(
+                                    target_file,
+                                    suite_version,
+                                    compiler_ver,
+                                    current_label,
+                                    current_sample,
+                                )
                             )
-                        )
+                        else:
+                            logging.warning("Expected JSON not found in %s", sample_dir)
+                    elif current_suite_name == "raja":
+                        try:
+                            all_records.extend(
+                                parse_raja_result_directory(
+                                    sample_dir,
+                                    suite_version,
+                                    compiler_ver,
+                                    current_label,
+                                    current_sample,
+                                )
+                            )
+                        except ParseError as exc:
+                            raise ParseError(str(exc)) from exc
                     else:
-                        logging.warning("Expected JSON not found in %s", run_dir)
-                elif current_suite_name == "raja":
-                    try:
-                        all_records.extend(
-                            parse_raja_result_directory(run_dir, suite_version, compiler_ver, current_label)
-                        )
-                    except ParseError as exc:
-                        raise ParseError(str(exc)) from exc
-                else:
-                    logging.warning("Unknown suite type: %s", current_suite_name)
+                        logging.warning("Unknown suite type: %s", current_suite_name)
 
     return all_records
 

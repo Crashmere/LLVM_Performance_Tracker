@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 
 
 def aggregate_benchmark_records(df: pd.DataFrame) -> pd.DataFrame:
-    group_keys = ["suite_name", "suite_version", "compiler_version", "test_name"]
+    group_keys = ["suite_name", "suite_version", "compiler_version", "label", "sample", "test_name"]
 
     agg_rules = {
         "exec_time": ["mean", "std", "count"],

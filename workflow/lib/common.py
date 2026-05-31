@@ -63,13 +63,37 @@ def _parse_bool(value: Any, field_name: str) -> bool:
     return value
 
 
-def _build_experiment_id(llvm_tag: str, official_tag: str, raja_tag: str, label: str) -> str:
+def _parse_positive_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"{field_name} must be a positive integer, got boolean.")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{field_name} must be a positive integer.") from exc
+    if parsed < 1:
+        raise ValueError(f"{field_name} must be at least 1.")
+    return parsed
+
+
+def _normalize_samples(config: dict[str, Any]) -> list[str]:
+    raw_samples = config.get("samples", {})
+    if raw_samples is None:
+        raw_samples = {}
+    if not isinstance(raw_samples, dict):
+        raise TypeError(f"samples must be a mapping, got {type(raw_samples).__name__}.")
+
+    count = _parse_positive_int(raw_samples.get("count", 1), "samples.count")
+    return [f"sample_{index}" for index in range(1, count + 1)]
+
+
+def _build_experiment_id(llvm_tag: str, official_tag: str, raja_tag: str, label: str, sample: str) -> str:
     return "__".join(
         [
             f"llvm_{_slugify(llvm_tag)}",
             f"official_{_slugify(official_tag)}",
             f"raja_{_slugify(raja_tag)}",
             f"label_{_slugify(label)}",
+            _slugify(sample),
         ]
     )
 
@@ -79,15 +103,17 @@ def _normalize_simple_experiments(
     official_tags: list[str],
     raja_tags: list[str],
     label: str,
+    samples: list[str],
 ) -> list[dict[str, Any]]:
     experiments: list[dict[str, Any]] = []
-    for llvm_tag, official_tag, raja_tag in product(llvm_tags, official_tags, raja_tags):
+    for llvm_tag, official_tag, raja_tag, sample in product(llvm_tags, official_tags, raja_tags, samples):
         experiments.append(
             {
                 "llvm_tag": llvm_tag,
                 "official_tag": official_tag,
                 "raja_tag": raja_tag,
                 "label": label,
+                "sample": sample,
             }
         )
     return experiments
@@ -97,6 +123,7 @@ def _normalize_explicit_experiments(
     raw_experiments: list[Any],
     default_platform: str | None,
     label: str,
+    samples: list[str],
 ) -> list[dict[str, Any]]:
     experiments: list[dict[str, Any]] = []
     required_keys = ["llvm_tag", "official_tag", "raja_tag"]
@@ -115,15 +142,17 @@ def _normalize_explicit_experiments(
         official_tag = str(raw_experiment["official_tag"])
         raja_tag = str(raw_experiment["raja_tag"])
 
-        experiments.append(
-            {
-                "llvm_tag": llvm_tag,
-                "official_tag": official_tag,
-                "raja_tag": raja_tag,
-                "label": label,
-                "platform": raw_experiment.get("platform", default_platform),
-            }
-        )
+        for sample in samples:
+            experiments.append(
+                {
+                    "llvm_tag": llvm_tag,
+                    "official_tag": official_tag,
+                    "raja_tag": raja_tag,
+                    "label": label,
+                    "sample": sample,
+                    "platform": raw_experiment.get("platform", default_platform),
+                }
+            )
 
     return experiments
 
@@ -131,22 +160,23 @@ def _normalize_explicit_experiments(
 def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     experiments: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
-    seen_keys: set[tuple[str, str, str, str]] = set()
+    seen_keys: set[tuple[str, str, str, str, str]] = set()
 
     for raw_experiment in raw_experiments:
         llvm_tag = str(raw_experiment["llvm_tag"])
         official_tag = str(raw_experiment["official_tag"])
         raja_tag = str(raw_experiment["raja_tag"])
         label = str(raw_experiment["label"])
+        sample = str(raw_experiment["sample"])
         llvm_version = resolve_llvm_version(llvm_tag)
-        experiment_id = _build_experiment_id(llvm_tag, official_tag, raja_tag, label)
-        experiment_key = (llvm_tag, official_tag, raja_tag, label)
+        experiment_id = _build_experiment_id(llvm_tag, official_tag, raja_tag, label, sample)
+        experiment_key = (llvm_tag, official_tag, raja_tag, label, sample)
 
         if experiment_key in seen_keys:
             raise ValueError(
                 "Duplicate experiment combination detected for "
                 f"llvm_tag={llvm_tag!r}, official_tag={official_tag!r}, "
-                f"raja_tag={raja_tag!r}, label={label!r}."
+                f"raja_tag={raja_tag!r}, label={label!r}, sample={sample!r}."
             )
         if experiment_id in seen_ids:
             raise ValueError(f"Duplicate experiment_id generated: {experiment_id}")
@@ -162,6 +192,7 @@ def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[st
                 "official_tag": official_tag,
                 "raja_tag": raja_tag,
                 "label": label,
+                "sample": sample,
                 "platform": raw_experiment.get("platform"),
             }
         )
@@ -178,6 +209,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     test_selection = normalize_test_selection(config)
     raw_experiments = config.get("experiments", [])
     label = _normalize_label(config.get("label"))
+    samples = _normalize_samples(config)
 
     if raw_experiments:
         llvm_tags: list[str] = []
@@ -200,6 +232,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             raw_experiments=raw_experiments,
             default_platform=default_platform,
             label=label,
+            samples=samples,
         )
         experiment_mode = "explicit"
     else:
@@ -208,6 +241,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             official_tags=official_tags,
             raja_tags=raja_tags,
             label=label,
+            samples=samples,
         )
         experiment_mode = "simple"
 
@@ -224,6 +258,10 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             "reconfigure": _parse_bool(build["reconfigure"], "build.reconfigure"),
         },
         "label": label,
+        "samples": {
+            "count": len(samples),
+            "names": samples,
+        },
         "llvm": {
             "repo_url": repositories["llvm"],
             "tags": llvm_tags,

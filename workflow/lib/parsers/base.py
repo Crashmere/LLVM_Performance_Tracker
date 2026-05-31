@@ -22,5 +22,6 @@ class ResultParser(ABC):
         suite_version: str,
         compiler_ver: str,
         label: str,
+        sample: str,
     ) -> list[BenchmarkRecord]:
         raise NotImplementedError

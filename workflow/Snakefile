@@ -164,15 +164,16 @@ rule run_official:
         build_stamp=str(BASE_DIR / "builds" / "official" / "{official_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
         llvm_clangxx=str(BASE_DIR / "installs" / "llvm" / "{llvm_tag}" / "bin" / "clang++"),
     output:
-        results=str(BASE_DIR / "results" / "official-{official_tag}" / "{llvm_tag}" / "{label}" / "baseline_results.json"),
-        stamp=str(BASE_DIR / "results" / "official-{official_tag}" / "{llvm_tag}" / "{label}" / ".run_complete"),
+        results=str(BASE_DIR / "results" / "official-{official_tag}" / "{llvm_tag}" / "{label}" / "{sample}" / "baseline_results.json"),
+        stamp=str(BASE_DIR / "results" / "official-{official_tag}" / "{llvm_tag}" / "{label}" / "{sample}" / ".run_complete"),
     log:
-        str(BASE_DIR / "logs" / "_runs" / "official" / "{official_tag}" / "{llvm_tag}" / "{label}" / "run_official.log"),
+        str(BASE_DIR / "logs" / "_runs" / "official" / "{official_tag}" / "{llvm_tag}" / "{label}" / "{sample}" / "run_official.log"),
     threads:
         EXCLUSIVE_BENCHMARK_THREADS
     params:
         build_dir=lambda wildcards: str(BASE_DIR / "builds" / "official" / wildcards.official_tag / f"llvm-{wildcards.llvm_tag}"),
         lit_args=WORKFLOW_CONFIG["test_selection"]["official"]["resolved_lit_args"],
+        sample=lambda wildcards: wildcards.sample,
     script:
         "scripts/run_official.py"
 
@@ -182,15 +183,16 @@ rule run_raja:
         build_stamp=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / ".build_complete"),
         exe=str(BASE_DIR / "builds" / "raja" / "{raja_tag}" / "llvm-{llvm_tag}" / "bin" / "raja-perf.exe"),
     output:
-        stamp=str(BASE_DIR / "results" / "raja-{raja_tag}" / "{llvm_tag}" / "{label}" / ".run_complete"),
+        stamp=str(BASE_DIR / "results" / "raja-{raja_tag}" / "{llvm_tag}" / "{label}" / "{sample}" / ".run_complete"),
     log:
-        str(BASE_DIR / "logs" / "_runs" / "raja" / "{raja_tag}" / "{llvm_tag}" / "{label}" / "run_raja.log"),
+        str(BASE_DIR / "logs" / "_runs" / "raja" / "{raja_tag}" / "{llvm_tag}" / "{label}" / "{sample}" / "run_raja.log"),
     threads:
         EXCLUSIVE_BENCHMARK_THREADS
     params:
         exe=lambda wildcards: str(BASE_DIR / "builds" / "raja" / wildcards.raja_tag / f"llvm-{wildcards.llvm_tag}" / "bin" / "raja-perf.exe"),
-        result_dir=lambda wildcards: str(BASE_DIR / "results" / f"raja-{wildcards.raja_tag}" / wildcards.llvm_tag / wildcards.label),
+        result_dir=lambda wildcards: str(BASE_DIR / "results" / f"raja-{wildcards.raja_tag}" / wildcards.llvm_tag / wildcards.label / wildcards.sample),
         extra_args=WORKFLOW_CONFIG["test_selection"]["raja"]["resolved_extra_args"],
+        sample=lambda wildcards: wildcards.sample,
     script:
         "scripts/run_raja.py"
 
@@ -213,6 +215,7 @@ rule parse_results:
     params:
         input_dir=str(BASE_DIR / "results"),
         label=lambda wildcards: experiment_from_wildcards(wildcards)["label"],
+        sample=lambda wildcards: experiment_from_wildcards(wildcards)["sample"],
         compiler_version=lambda wildcards: experiment_from_wildcards(wildcards)["llvm_tag"],
         official_tag=lambda wildcards: experiment_from_wildcards(wildcards)["official_tag"],
         raja_tag=lambda wildcards: experiment_from_wildcards(wildcards)["raja_tag"],
@@ -220,6 +223,7 @@ rule parse_results:
         ".venv/bin/python workflow/scripts/parse_results_cli.py "
         "--input-dir {params.input_dir} "
         "--label {params.label} "
+        "--sample {params.sample} "
         "--compiler-version {params.compiler_version} "
         "--suite-version official={params.official_tag} "
         "--suite-version raja={params.raja_tag} "

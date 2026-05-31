@@ -6,6 +6,10 @@ project:
 # If the `label` is omitted, a timestamp label is generated automatically.
 # label: "baseline"
 
+# Number of independent samples to run for each experiment configuration.
+samples:
+  count: 1
+
 build:
   ninja_jobs: 6
   clean_build: false

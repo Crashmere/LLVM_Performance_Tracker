@@ -11,6 +11,7 @@ from typing import Any
 SUMMARY_FIELDS = [
     "experiment_id",
     "label",
+    "sample",
     "llvm_tag",
     "official_tag",
     "raja_tag",
@@ -56,6 +57,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
                 {
                     "experiment_id": metadata_file.parent.name,
                     "label": "",
+                    "sample": "",
                     "llvm_tag": "",
                     "official_tag": "",
                     "raja_tag": "",
@@ -85,6 +87,7 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
             {
                 "experiment_id": experiment.get("experiment_id", metadata_file.parent.name),
                 "label": experiment.get("label", ""),
+                "sample": experiment.get("sample", ""),
                 "llvm_tag": experiment.get("llvm_tag", ""),
                 "official_tag": experiment.get("official_tag", ""),
                 "raja_tag": experiment.get("raja_tag", ""),

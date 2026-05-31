@@ -24,6 +24,7 @@ class KernelRunDataAdapter(ResultParser):
         suite_version: str,
         compiler_ver: str,
         label: str,
+        sample: str,
     ) -> list[BenchmarkRecord]:
         raw_rows = parse_kernel_run_data(path)
         records: list[BenchmarkRecord] = []
@@ -40,6 +41,7 @@ class KernelRunDataAdapter(ResultParser):
                     compiler_version=compiler_ver,
                     compiler_tag=compiler_ver,
                     label=label,
+                    sample=sample,
                     test_name=test_name,
                     status=row.get("Checksum", "UNKNOWN"),
                     metrics=BenchmarkMetrics(
@@ -67,6 +69,7 @@ class TimingAverageAdapter(ResultParser):
         suite_version: str,
         compiler_ver: str,
         label: str,
+        sample: str,
     ) -> list[BenchmarkRecord]:
         rows = parse_timing_average(path)
         records: list[BenchmarkRecord] = []
@@ -79,6 +82,7 @@ class TimingAverageAdapter(ResultParser):
                     compiler_version=compiler_ver,
                     compiler_tag=compiler_ver,
                     label=label,
+                    sample=sample,
                     test_name=test_name,
                     status="COMPLETED",
                     status_detail="Parsed from RAJAPerf timing average matrix; checksum is unavailable.",
@@ -95,6 +99,7 @@ def parse_raja_result_directory(
     suite_version: str,
     compiler_ver: str,
     label: str,
+    sample: str,
 ) -> list[BenchmarkRecord]:
     adapters: list[ResultParser] = [KernelRunDataAdapter(), TimingAverageAdapter()]
     discovered = sorted(path.name for path in run_dir.glob("RAJAPerf*") if path.is_file())
@@ -102,7 +107,7 @@ def parse_raja_result_directory(
         candidate = run_dir / filename
         for adapter in adapters:
             if adapter.can_parse(candidate):
-                return adapter.parse(candidate, suite_version, compiler_ver, label)
+                return adapter.parse(candidate, suite_version, compiler_ver, label, sample)
 
     raise ParseError(
         "No supported RAJA result schema found in "
