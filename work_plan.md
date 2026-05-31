@@ -60,11 +60,8 @@
 4. 测试子集选择功能尚未实现。
    报告和 work plan 都明确提到要支持用户控制测试范围，以减少运行时间、输出体积和资源消耗。
 
-5. 历史运行数据复用能力还不完整。
-   当前可以通过 Snakemake target 从已有原始结果重建派生产物，也能通过 inspect 查看 metadata-backed experiment，但系统仍缺少：
-   - 面向多个历史 experiment 的显式对比输入模型
-   - 面向历史 experiment/run 的更友好筛选入口
-   - 面向跨 run 复用和比较的数据选择模型
+5. 全量历史结果分析能力还不完整。
+   当前可以通过 Snakemake target 从已有原始结果重建派生产物，也能通过 inspect 查看 metadata-backed experiment，但系统仍缺少默认扫描 `auto/` 中全部可用 aggregated 结果并构建统一 analysis dataset 的能力。
 
 6. 可视化还处于演示版。
    当前图表固定、过滤能力弱，尚未支持 kernel 级交互、对比模式、差异高亮、失败结果展示等。
@@ -96,7 +93,7 @@
 - 将“原始结果解析”和“分析视图模型”分层，避免后续复杂分析都直接耦合在 CSV 上。
 - 为 Snakemake 提供 profile、cluster/HPC 运行说明和资源声明。
 - 继续明确“仅重跑失败版本/失败 suite”的推荐 Snakemake target 用法。
-- 增强从历史 experiment 重建派生产物的选择模型，例如按 metadata 条件选择 parsed/aggregated/report 输入。
+- 增强从历史 experiment 重建派生产物的说明，但分析主线默认基于 `auto/` 中保留的全部可用结果。
 - 增加数据清洗规则，自动识别异常值、空结果、编译失败和运行崩溃。
 - 持续整理 `workflow/lib/` 的模块边界，避免 `common.py` 再次变成混合配置、路径、构建和 suite 细节的工具箱。
 
@@ -734,100 +731,52 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ---
 
-## 阶段 6：重复实验、差异分析与可靠回归检测
+## 阶段 6：全量结果分析数据层
 
 ### 目标
 
-落实报告中的 Task 3.1 和 Future Work 中的 repeated runs / significance testing，把系统从“收集结果”升级为“能够基于重复样本可靠发现变化”的分析工具。
+落实报告中的 Task 3.1 和 Future Work 中的 repeated runs / significance testing，但不另起一套独立的文字报告系统。
+
+阶段六的目标是为最终 HTML report 构建 report-ready analysis layer：
+
+- Snakemake 主流水线完成 benchmark、parse、aggregate、analysis、report 全部工作。
+- 系统默认扫描并分析当前 `auto/` 中保留下来的全部可用结果。
+- 用户如果不希望某些结果进入分析，应删除对应产物，而不是通过复杂命令手工筛选。
+- analysis layer 产出结构化数据表，供阶段七的 HTML report 直接消费。
 
 ### 当前差距
 
 - `workflow/lib/reporting.py` 只能对单张 parsed 表中的重复记录做基础 `mean/std/count` 聚合。
-- 没有版本间差异计算。
-- 没有基准版本概念。
-- 没有阈值过滤和回归榜单。
-- 历史 experiment/run 还不能方便地作为对比输入集合被显式选择和复用。
-- 当前系统只保留一个全局 `label`，没有内置重复运行展开，也没有独立的 repeat/sample 标识。
-- 缺少环境稳定性记录、置信区间和显著性判断，不利于区分真实性能变化与噪声。
+- 尚无统一的全量 analysis dataset。
+- HTML report 目前只消费单个 experiment 的 aggregated CSV，缺少跨版本、跨 label、跨 sample 的分析输入。
+- 尚无版本间差异计算、阈值过滤、回归/改善榜单。
+- 当前系统只保留一个全局 `label`，还需要独立的 sample 维度支撑重复实验。
+- 缺少样本统计、置信区间和显著性证据，不利于区分真实性能变化与噪声。
 
 ### 需要完成的功能
 
-- 提供基础版本对比分析。
 - 增加独立的重复实验 sample 模型。
 - 将相同配置的多次运行组织成可分析的统计样本组。
-- 自动检测改善和回归，并区分候选变化与统计上可信的变化。
+- 自动扫描 `auto/parsed/*/benchmark_records_aggregated.csv` 中全部可用结果。
+- 生成统一的 analysis dataset，作为 HTML report 的数据输入。
+- 自动计算改善和回归，并区分候选变化与统计上可信的变化。
 - 支持用户设定显著变化阈值。
-- 生成可直接写入论文分析部分的数据表。
-- 支持从多个历史 experiment/run 选择输入数据，而不是只依赖当前一次执行的输出。
+- 生成可供 HTML report 可视化消费的结构化分析表。
 
 ### 需要修改/新增的代码或文件
 
-- `workflow/lib/reporting.py`
 - 新增：
-  - `workflow/lib/regression_analysis.py`
+  - `workflow/lib/analysis.py`
   - `workflow/lib/statistics.py`
-  - `tools/compare_versions.py`
-  - `tools/compare_sample_groups.py`
+  - `workflow/scripts/build_analysis_dataset.py`
+- 修改：
+  - `workflow/Snakefile`
+  - `workflow/lib/reporting.py`
+  - `workflow/scripts/generate_report_cli.py`
 
 ### 具体修改内容
 
-#### 阶段 6A：基础差异分析
-
-1. 定义基础比较模型：
-   - baseline 版本
-   - candidate 版本
-   - suite
-   - test_name
-   - metric
-   - absolute delta
-   - relative delta
-   - direction
-
-2. 支持多指标比较：
-   - `exec_time`
-   - `compile_time`
-   - `binary_size`
-   - `bandwidth_gib`
-   - `flops_gflops`
-
-3. 增加阈值过滤：
-   - 例如执行时间变化超过 5%
-   - GFLOP/s 下降超过 3%
-
-4. 生成分析输出：
-   - `regressions.csv`
-   - `improvements.csv`
-   - `comparison_summary.json`
-
-5. 增加“最值得关注的 kernels”榜单：
-   - Top regressions
-   - Top improvements
-   - 波动最大测试
-
-6. 扩展输入模型：
-   - 支持按 `experiment_id`、`label` 或 metadata 条件读取多个历史 parsed 文件
-   - 或从 `results/` 中按条件重建比较输入
-   - 明确区分“单次实验报告输入”和“跨 run 比较输入”
-   - 在比较记录中保留 `experiment_id`、`label` 和未来可扩展的 `sample` 边界
-
-阶段 6A 的输出属于候选变化列表。即使只有单次实验也可以使用，但不能将结果表述为经过统计验证的最终回归结论。
-
-#### 当前阶段 6A 实现
-
-- 新增 `workflow/lib/regression_analysis.py`，集中定义指标方向、输入校验、阈值分类和 summary 生成逻辑。
-- 新增 `tools/compare_versions.py`，支持通过历史 `experiment_id` 或 aggregated CSV / Parquet 文件显式选择 baseline 和 candidate。
-- `run.sh` 新增 `compare` 快捷入口。
-- 比较工具从 `config.yml` 读取 `project.base_dir`，不在 `run.sh` 中硬编码结果根目录。
-- 当前输出：
-  - `comparison.csv`
-  - `regressions.csv`
-  - `improvements.csv`
-  - `comparison_summary.json`
-- `regressions.csv` 和 `improvements.csv` 按变化幅度排序。
-- `comparison_summary.json` 明确标注当前属于不含统计显著性检验的阶段 6A 候选变化分析。
-- 使用说明见 `docs/comparison.md`。
-
-#### 阶段 6B：重复实验样本模型
+#### 阶段 6A：sample 维度进入主流水线
 
 1. 提供重复实验配置：
    - 设计应避免重新引入多个标签概念。
@@ -848,29 +797,34 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 线程数
    - OpenMP 环境变量
 
-#### 当前阶段 6B 实现
+#### 阶段 6B：全量 analysis dataset
 
-- 新增全局配置：
-  - `samples.count`
-  - 默认值为 `1`
-  - `count=3` 时展开为 `sample_1`、`sample_2`、`sample_3`
-- `label` 继续表示实验组，`sample` 表示同一实验组中的独立观测。
-- `experiment_id` 现在包含 sample 段，例如：
-  - `...__label_<label>__sample_1`
-- 原始结果路径变为：
-  - `auto/results/official-<official_tag>/<llvm_tag>/<label>/<sample>/`
-  - `auto/results/raja-<raja_tag>/<llvm_tag>/<label>/<sample>/`
-- run log 路径同步加入 `<sample>`。
-- `experiment.json` 中写入 `experiment.sample`，metadata 的 expected output 和 log path 也指向 sample 目录。
-- parsed 和 aggregated 表新增 `sample` 列。
-- 常规 `aggregate_results` 保留 sample 边界，不跨 sample 自动求统计量。
-- `parse_results_cli.py` 新增 `--sample` 过滤参数。
-- `inspect` 输出新增 `sample` 列。
-- 使用说明见 `docs/samples.md`。
+1. 新增 Snakemake rule，例如 `build_analysis_dataset`。
+2. 输入为当前 workflow 已生成的 aggregated CSV，以及 `auto/parsed/` 中已存在且可用的历史 aggregated CSV。
+3. 默认纳入所有可用结果：
+   - 不要求用户手写复杂历史 experiment 列表。
+   - 不满意或不想纳入的结果由用户从 `auto/` 中删除。
+4. 输出 report-ready tables：
+   - `auto/analysis/analysis_records.csv`
+   - `auto/analysis/sample_statistics.csv`
+   - `auto/analysis/metric_comparisons.csv`
+   - `auto/analysis/top_regressions.csv`
+   - `auto/analysis/top_improvements.csv`
+   - `auto/analysis/analysis_summary.json`
+5. analysis records 至少保留：
+   - `experiment_id`
+   - `llvm_tag` / `compiler_version`
+   - `suite_name`
+   - `suite_version`
+   - `test_name`
+   - `metric`
+   - `label`
+   - `sample`
+   - `value`
 
-#### 阶段 6C：可靠回归检测
+#### 阶段 6C：report-ready 可靠变化分析
 
-1. 扩展统计分析输出：
+1. 基于全量 analysis dataset 扩展统计分析：
    - 均值
    - 标准差
    - 变异系数
@@ -882,52 +836,17 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 超过阈值但统计证据不足的变化
    - 统计上显著的 regression / improvement
 
-3. 为报告层提供稳定的分析输入：
-   - 报告模块只负责渲染分析结果。
-   - 差异计算、样本聚合和统计检验不继续堆积在 `reporting.py` 中。
-
-#### 当前阶段 6C 实现
-
-- 新增 `workflow/lib/statistics.py`：
-  - 将多个 sample 的 aggregated 表转换为长表观测值。
-  - 按 suite / test / metric 汇总样本均值、标准差、变异系数和 95% 置信区间。
-  - 比较 baseline / candidate 样本组，并输出阈值分类和统计证据。
-- 新增 `tools/compare_sample_groups.py`。
-- `run.sh` 新增 `compare-samples` 快捷入口。
-- 输入支持：
-  - 多个 `--baseline-experiment`
-  - 多个 `--candidate-experiment`
-  - 多个 `--baseline-file`
-  - 多个 `--candidate-file`
-- 输出包括：
-  - `sample_observations.csv`
-  - `sample_statistics.csv`
-  - `statistical_comparison.csv`
-  - `reliable_regressions.csv`
-  - `reliable_improvements.csv`
-  - `candidate_regressions.csv`
-  - `candidate_improvements.csv`
-  - `statistical_summary.json`
-- 分类包括：
-  - `reliable_regression`
-  - `reliable_improvement`
-  - `candidate_regression`
-  - `candidate_improvement`
-  - `within_threshold`
-  - `unchanged`
-  - `unclassified`
-- 默认每组至少需要 3 个 sample，才会把超过阈值且通过显著性筛选的变化标为 `reliable_*`。
-- 当前实现使用 Welch-style p-value 的正态近似，适合作为轻量筛选工具；小样本结论仍需谨慎解释。
-- 使用说明见 `docs/statistical_analysis.md`。
+3. 所有分析结果都作为 HTML report 输入，而不是另起命令生成独立文字报告。
+4. `reporting.py` 只负责渲染；差异计算、样本聚合和统计检验放在 `analysis.py` / `statistics.py` 中。
 
 ### 验收标准
 
-- 用户能指定基准 LLVM 版本并自动生成候选回归列表。
-- 用户能从已有历史 experiment/run 中选择比较对象，而不需要重新执行 benchmark。
+- 用户只需运行主 Snakemake 流水线即可得到 benchmark、analysis 和 HTML report。
+- 系统默认分析当前 `auto/` 中保留下来的全部可用 aggregated 结果。
 - 用户可以通过配置展开同一实验组的多个 sample。
 - 同一版本的多轮结果可被自动识别为同一个统计样本组。
-- 报告和分析结果能区分“候选变化”“噪声波动”和“统计上可信的变化”。
-- 结果表可以直接支撑论文中“性能变化分析”章节。
+- HTML report 能展示候选变化、噪声波动和统计上可信的变化。
+- 阶段六产出的分析表可以直接支撑阶段七的可视化报告。
 
 ---
 
@@ -942,21 +861,22 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 目前图表固定，只有两个子图。
 - 缺少筛选、搜索、对比和失败项展示。
 - 尚未突出多版本、多轮次、变化阈值分析的价值。
-- 报告入口仍主要围绕单个 experiment 输出，缺少“对多个历史 experiment 生成组合报告”的显式工作流。
+- 报告入口仍主要围绕单个 experiment 输出，尚未消费阶段六生成的全量 analysis tables。
 
 ### 需要完成的功能
 
 - 改进静态 HTML 报告。
 - 增加交互过滤和多视图展示。
 - 如果时间允许，再追加轻量 Web App。
-- 支持历史 experiment 的报告重生成与历史 experiment 对比报告。
+- 将阶段六的全量 analysis dataset 渲染成最终 HTML report。
+- 保持单一 Snakemake 主流水线；不要引入额外 `run.sh report` 或复杂手工选择入口作为主线。
 
 ### 需要修改/新增的代码或文件
 
-- `workflow/lib/reporting.py`
-- `workflow/scripts/generate_report_cli.py`
-- 可能新增：
-  - `workflow/lib/analysis.py`
+  - `workflow/lib/reporting.py`
+  - `workflow/scripts/generate_report_cli.py`
+  - `workflow/Snakefile`
+  - 可能新增：
   - `workflow/lib/report_views.py`
   - `app/streamlit_app.py` 或 `app/dash_app.py`
 
@@ -992,18 +912,17 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 页面聚焦结果筛选与对比，不做复杂后端。
 
 6. 增加历史报告工作流：
-   - 允许用户指定一个已有 `experiment_id` 直接重建 HTML 报告
+   - 报告输入来自阶段六的 `auto/analysis/` 产物。
    - 将聚合分析逻辑与 Plotly 视图生成解耦，避免 `reporting.py` 同时承担 table IO、统计聚合和可视化布局。
-   - 复用阶段六的 `regression_analysis.py` 和 `statistics.py`，报告模块只负责把分析结果渲染出来。
-   - 允许用户选择多个历史 experiment/run 生成对比报告
-   - 在报告首页展示数据来源 experiment/run、生成时间和输入文件摘要
+   - 报告模块只负责渲染 analysis tables。
+   - 报告首页展示纳入分析的结果数量、版本数量、sample 数量和生成时间。
 
 ### 验收标准
 
 - 静态报告不再局限于两个固定图。
 - 用户能在报告中快速定位某个 kernel 或某类 benchmark。
 - 回归和改善项在界面上可直接识别。
-- 历史 experiment 的报告可以在不重跑 benchmark 的前提下重新生成。
+- HTML report 默认反映当前 `auto/` 中保留下来的全部可用结果。
 
 ---
 
@@ -1241,8 +1160,8 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 这样排序的原因是：
 
 - 阶段 3 已解决构建缓存和磁盘可见性，可以减少后续解析、测试子集和多版本采集时的无谓重编成本。
-- 如果不能稳定复用历史 experiment/run，后续调报告、补 parser、做比较分析时会被迫重复运行 benchmark，成本过高。
-- 可靠回归检测需要把版本比较、重复样本模型和统计显著性作为同一条分析链路逐层实现。
+- 如果不能稳定复用 `auto/` 中保留下来的历史结果，后续调报告、补 parser、做分析时会被迫重复运行 benchmark，成本过高。
+- 可靠回归检测需要把全量 analysis dataset、重复样本模型和统计显著性作为同一条分析链路逐层实现。
 - 报告增强要建立在稳定的数据层和分析层之上。
 - 自动监控和新 suite 扩展对毕业项目是加分项，但不是当前最急的堵点。
 
@@ -1271,7 +1190,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 已具备版本比较与回归检测
 - 已具备改进后的交互式报告
 - 已具备显著性分析
-- 已能复用历史 experiment/run 生成比较输入与对比报告
+- 已能基于 `auto/` 中保留的全部可用结果生成 analysis dataset 和 HTML 分析报告
 - 已能产出关键图表和结论表
 
 ### 里程碑 D：可作为完整项目交付
