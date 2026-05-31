@@ -32,6 +32,7 @@ Usage:
   ./run.sh strict [command|args...] Run without --keep-going.
   ./run.sh inspect [args...]       Inspect existing outputs without changing state.
   ./run.sh disk [args...]          Show disk usage under the workflow base directory.
+  ./run.sh compare [args...]       Compare two historical aggregated result tables.
   ./run.sh -- <args...>            Pass extra arguments through to snakemake.
 
 Defaults:
@@ -76,6 +77,15 @@ case "${1-}" in
       exit 1
     fi
     exec "$PYTHON_BIN" "$ROOT_DIR/tools/report_disk_usage.py" --config-file "$ROOT_DIR/config.yml" "$@"
+    ;;
+  compare)
+    shift
+    if [[ ! -x "$PYTHON_BIN" ]]; then
+      echo "Missing python executable at $PYTHON_BIN" >&2
+      echo "Create the virtual environment and install dependencies first." >&2
+      exit 1
+    fi
+    exec "$PYTHON_BIN" "$ROOT_DIR/tools/compare_versions.py" --config-file "$ROOT_DIR/config.yml" "$@"
     ;;
   --)
     shift

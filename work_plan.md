@@ -766,7 +766,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 新增：
   - `workflow/lib/regression_analysis.py`
   - `workflow/lib/statistics.py`
-  - `workflow/scripts/compare_versions_cli.py`
+  - `tools/compare_versions.py`
   - `workflow/scripts/compare_repeats_cli.py`
 
 ### 具体修改内容
@@ -811,6 +811,21 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 在比较记录中保留 `experiment_id`、`label` 和未来可扩展的 `sample` 边界
 
 阶段 6A 的输出属于候选变化列表。即使只有单次实验也可以使用，但不能将结果表述为经过统计验证的最终回归结论。
+
+#### 当前阶段 6A 实现
+
+- 新增 `workflow/lib/regression_analysis.py`，集中定义指标方向、输入校验、阈值分类和 summary 生成逻辑。
+- 新增 `tools/compare_versions.py`，支持通过历史 `experiment_id` 或 aggregated CSV / Parquet 文件显式选择 baseline 和 candidate。
+- `run.sh` 新增 `compare` 快捷入口。
+- 比较工具从 `config.yml` 读取 `project.base_dir`，不在 `run.sh` 中硬编码结果根目录。
+- 当前输出：
+  - `comparison.csv`
+  - `regressions.csv`
+  - `improvements.csv`
+  - `comparison_summary.json`
+- `regressions.csv` 和 `improvements.csv` 按变化幅度排序。
+- `comparison_summary.json` 明确标注当前属于不含统计显著性检验的阶段 6A 候选变化分析。
+- 使用说明见 `docs/comparison.md`。
 
 #### 阶段 6B：重复实验样本模型
 
