@@ -51,4 +51,4 @@ The normal aggregation step preserves the sample boundary. It does not merge mul
 
 ## Interpretation
 
-Stage 6B only creates and records independent samples. Statistical aggregation across samples, confidence intervals, and significance testing belong to the next analysis layer.
+Stage 6B creates and records independent samples. Stage 6C uses those samples for statistical aggregation, confidence intervals, and significance screening. See `docs/statistical_analysis.md`.

@@ -767,7 +767,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
   - `workflow/lib/regression_analysis.py`
   - `workflow/lib/statistics.py`
   - `tools/compare_versions.py`
-  - `workflow/scripts/compare_repeats_cli.py`
+  - `tools/compare_sample_groups.py`
 
 ### 具体修改内容
 
@@ -885,6 +885,40 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 3. 为报告层提供稳定的分析输入：
    - 报告模块只负责渲染分析结果。
    - 差异计算、样本聚合和统计检验不继续堆积在 `reporting.py` 中。
+
+#### 当前阶段 6C 实现
+
+- 新增 `workflow/lib/statistics.py`：
+  - 将多个 sample 的 aggregated 表转换为长表观测值。
+  - 按 suite / test / metric 汇总样本均值、标准差、变异系数和 95% 置信区间。
+  - 比较 baseline / candidate 样本组，并输出阈值分类和统计证据。
+- 新增 `tools/compare_sample_groups.py`。
+- `run.sh` 新增 `compare-samples` 快捷入口。
+- 输入支持：
+  - 多个 `--baseline-experiment`
+  - 多个 `--candidate-experiment`
+  - 多个 `--baseline-file`
+  - 多个 `--candidate-file`
+- 输出包括：
+  - `sample_observations.csv`
+  - `sample_statistics.csv`
+  - `statistical_comparison.csv`
+  - `reliable_regressions.csv`
+  - `reliable_improvements.csv`
+  - `candidate_regressions.csv`
+  - `candidate_improvements.csv`
+  - `statistical_summary.json`
+- 分类包括：
+  - `reliable_regression`
+  - `reliable_improvement`
+  - `candidate_regression`
+  - `candidate_improvement`
+  - `within_threshold`
+  - `unchanged`
+  - `unclassified`
+- 默认每组至少需要 3 个 sample，才会把超过阈值且通过显著性筛选的变化标为 `reliable_*`。
+- 当前实现使用 Welch-style p-value 的正态近似，适合作为轻量筛选工具；小样本结论仍需谨慎解释。
+- 使用说明见 `docs/statistical_analysis.md`。
 
 ### 验收标准
 
