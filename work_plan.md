@@ -22,11 +22,13 @@
 结合 `workflow/` 和 `auto/` 当前状态，可以把现有系统理解为一个“Snakemake 阶段二后基线版”，已经具备以下能力：
 
 - 已从单体 Python orchestration 迁移为 Snakemake DAG。
-- 已实现 LLVM、Official test-suite、RAJAPerf 的 checkout / build / run / parse / aggregate / report 全流程。
+- 已实现 LLVM、Official test-suite、RAJAPerf 的 checkout / build / run / parse / analyze / report 全流程。
 - 已引入参数化目录布局，支持按 `llvm_tag`、suite tag、全局 `label` 复用源码/构建/结果，并按 `experiment_id` 隔离解析结果、报告、元数据和实验级日志。
 - 已能生成统一表格数据：
   - `auto/parsed/<experiment_id>/benchmark_records.csv`
-  - `auto/parsed/<experiment_id>/benchmark_records_aggregated.csv`
+- 已能生成全量分析数据：
+  - `auto/analysis/analysis_records.csv`
+  - `auto/analysis/analysis_summary.json`
 - 已能生成 Plotly HTML 报告：
   - `auto/reports/<experiment_id>/benchmark_report.html`
 - 已支持 simple matrix mode 和 explicit experiment mode，可以从配置展开多实验矩阵；全局 `label` 统一标识本次运行，未配置时自动使用时间戳。
@@ -61,7 +63,7 @@
    报告和 work plan 都明确提到要支持用户控制测试范围，以减少运行时间、输出体积和资源消耗。
 
 5. 全量历史结果分析能力已有基础闭环。
-   当前主流水线已经可以扫描 `auto/` 中保留的可用 aggregated 结果并构建统一 analysis dataset；后续重点应放在更好的可视化呈现和更细的对比视图上。
+   当前主流水线已经可以扫描 `auto/` 中保留的可用 parsed 结果并构建统一 analysis dataset；后续重点应放在更好的可视化呈现和更细的对比视图上。
 
 6. 可视化还处于演示版。
    当前图表固定、过滤能力弱，尚未支持 kernel 级交互、对比模式、差异高亮、失败结果展示等。
@@ -250,7 +252,7 @@
 - 明确推荐的恢复方式：
   - 使用 Snakemake `--rerun-incomplete` 处理中断或半成品。
   - 使用 Snakemake `--keep-going` 让批量实验尽量跑完其它独立项。
-  - 使用具体 target 只重建某个 experiment 的 parsed / aggregated / report。
+  - 使用具体 target 只重建某个 experiment 的 parsed / report，或重建全局 analysis。
   - 使用 `--forcerun` 或删除特定输出触发某个 rule 重跑。
 - 增加轻量的状态/诊断辅助命令，只负责“读取现有文件并汇总”，不负责调度或修改状态。
 - 把历史 experiment/run 恢复设计为普通 Snakemake target，而不是单独的恢复系统。
@@ -286,7 +288,7 @@
 
 4. 增加只读汇总命令。
    - `inspect_workflow_outputs.py` 扫描 `auto/metadata/`、`auto/results/`、`auto/parsed/`、`auto/reports/` 和 `auto/logs/`。
-   - 输出每个 experiment 的产物存在性摘要，例如 raw results、parsed、aggregated、report 是否存在。
+   - 输出每个 experiment 的产物存在性摘要，例如 raw results、parsed、report 是否存在。
    - 这个命令不生成调度计划、不写状态、不重跑任务，只帮助用户决定下一条 Snakemake 命令。
 
 5. 明确恢复和补跑模式全部映射为 Snakemake 用法。
@@ -295,7 +297,7 @@
    - 失败立即停止：`./run.sh strict`
    - 只重建某个报告：`./run.sh -- auto/reports/<experiment_id>/benchmark_report.html`
    - 只重跑某个规则：`./run.sh -- --forcerun run_raja auto/reports/<experiment_id>/benchmark_report.html`
-   - 已有原始结果时重建派生产物：直接指定对应 report 或 aggregated CSV target。
+   - 已有原始结果时重建派生产物：直接指定对应 parsed、report 或 analysis target。
 
 6. 文档化“不要做”的边界。
    - 不做全局 mutable manifest 状态机。
@@ -308,8 +310,8 @@
 - 每个最终报告都能追溯到一份 experiment metadata。
 - 运行失败时，用户能从 Snakemake 报错定位到对应日志，并在日志中看到清楚的失败命令和期望产物。
 - `./run.sh` 默认 `--keep-going`、`./run.sh resume` 和 `./run.sh strict` 被文档化并验证可用。
-- 用户可以通过指定 Snakemake target，只重建某个 experiment 的 parsed / aggregated / report，而不重新 checkout/build/run。
-- 汇总命令能列出各 experiment 的关键产物存在性，帮助判断缺的是 raw results、parsed、aggregated 还是 report。
+- 用户可以通过指定 Snakemake target，只重建某个 experiment 的 parsed / report，或重建全局 analysis，而不重新 checkout/build/run。
+- 汇总命令能列出各 experiment 的关键产物存在性，帮助判断缺的是 raw results、parsed 还是 report。
 - 阶段 2 完成后，主入口仍然是 Snakemake / `run.sh`，没有引入新的主调度入口。
 
 ---
@@ -718,7 +720,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 - 报告展示增强。
   - 在 HTML report 中显示当前 Official/RAJA selection 参数。
-  - 在 parsed/aggregated 表格中增加 selection 相关字段，便于后续跨 run 对比时过滤 full/subset run。
+  - 在 parsed / analysis 表格中增加 selection 相关字段，便于后续跨 run 对比时过滤 full/subset run。
 
 #### 阶段 5B 验收标准
 
@@ -754,7 +756,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 - 增加独立的重复实验 sample 模型。
 - 将相同配置的多次运行组织成可分析的统计样本组。
-- 自动扫描 `auto/parsed/*/benchmark_records_aggregated.csv` 中全部可用结果。
+- 自动扫描 `auto/parsed/*/benchmark_records.csv` 中全部可用结果。
 - 生成统一的 analysis dataset，作为阶段七 HTML report 的数据输入。
 - 自动计算改善和回归，并区分候选变化与统计上可信的变化。
 - 支持用户设定显著变化阈值。
@@ -764,7 +766,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 - 新增：
   - `workflow/lib/analysis.py`
-  - `workflow/scripts/build_analysis_dataset.py`
+  - `workflow/scripts/analyze.py`
 - 修改：
   - `workflow/Snakefile`
 
@@ -793,8 +795,8 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 #### 阶段 6B：全量 analysis dataset
 
-1. 新增 Snakemake rule，例如 `build_analysis_dataset`。
-2. 输入为当前 workflow 已生成的 aggregated CSV，以及 `auto/parsed/` 中已存在且可用的历史 aggregated CSV。
+1. 新增 Snakemake rule：`analyze`。
+2. 输入为当前 workflow 已生成的 parsed CSV，以及 `auto/parsed/` 中已存在且可用的历史 parsed CSV。
 3. 默认纳入所有可用结果：
    - 不要求用户手写复杂历史 experiment 列表。
    - 不满意或不想纳入的结果由用户从 `auto/` 中删除。
@@ -835,7 +837,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 ### 验收标准
 
 - 用户只需运行主 Snakemake 流水线即可得到 benchmark、analysis 数据和现有 HTML report。
-- 系统默认分析当前 `auto/` 中保留下来的全部可用 aggregated 结果。
+- 系统默认分析当前 `auto/` 中保留下来的全部可用 parsed 结果。
 - 用户可以通过配置展开同一实验组的多个 sample。
 - 同一版本的多轮结果可被自动识别为同一个统计样本组。
 - 阶段六产出的分析表可以直接支撑阶段七的可视化报告。
@@ -1167,7 +1169,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 已支持多 LLVM 版本矩阵运行
 - 已支持清晰失败诊断、产物摘要与 Snakemake target 级补跑
 - 已支持 test subset
-- 已支持从历史 experiment/run 重建 parsed / aggregated / report
+- 已支持从历史 experiment/run 重建 parsed / analysis / report
 - parser 对当前目标版本稳定
 
 ### 里程碑 B：可用于正式数据采集

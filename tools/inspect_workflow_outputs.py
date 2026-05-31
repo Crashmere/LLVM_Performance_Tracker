@@ -19,7 +19,6 @@ SUMMARY_FIELDS = [
     "shared_deps",
     "raw_results",
     "parsed",
-    "aggregated",
     "report",
     "next_step",
 ]
@@ -65,7 +64,6 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
                     "shared_deps": "missing",
                     "raw_results": "missing",
                     "parsed": "missing",
-                    "aggregated": "missing",
                     "report": "missing",
                     "next_step": f"metadata invalid: {exc}",
                 }
@@ -80,7 +78,6 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
         official_ok = exists(outputs.get("official_results"))
         raja_ok = exists(outputs.get("raja_run_stamp"))
         parsed_ok = exists(outputs.get("parsed_csv"))
-        aggregated_ok = exists(outputs.get("aggregated_csv"))
         report_ok = exists(outputs.get("report_html"))
 
         records.append(
@@ -95,14 +92,12 @@ def load_metadata_records(base_dir: Path) -> list[dict[str, Any]]:
                 "shared_deps": "present" if shared_ok else "missing",
                 "raw_results": "present" if official_ok and raja_ok else "missing",
                 "parsed": "present" if parsed_ok else "missing",
-                "aggregated": "present" if aggregated_ok else "missing",
                 "report": "present" if report_ok else "missing",
                 "next_step": suggest_next_step(
                     shared_status,
                     official_ok,
                     raja_ok,
                     parsed_ok,
-                    aggregated_ok,
                     report_ok,
                 ),
             }
@@ -134,7 +129,6 @@ def suggest_next_step(
     official_ok: bool,
     raja_ok: bool,
     parsed_ok: bool,
-    aggregated_ok: bool,
     report_ok: bool,
 ) -> str:
     missing_shared = [name for name, ok in shared_status.items() if not ok]
@@ -149,8 +143,6 @@ def suggest_next_step(
         return "run benchmark stage; missing " + " and ".join(missing)
     if not parsed_ok:
         return "rebuild parsed CSV target"
-    if not aggregated_ok:
-        return "rebuild aggregated CSV target"
     if not report_ok:
         return "rebuild report target"
     return "complete"

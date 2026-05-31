@@ -20,11 +20,11 @@ class MetricDefinition:
 
 
 METRICS: tuple[MetricDefinition, ...] = (
-    MetricDefinition("exec_time_mean", "exec_time", "Execution time", "lower"),
-    MetricDefinition("compile_time_mean", "compile_time", "Compile time", "lower"),
-    MetricDefinition("binary_size_first", "binary_size", "Binary size", "lower"),
-    MetricDefinition("flops_gflops_mean", "flops_gflops", "Throughput", "higher"),
-    MetricDefinition("bandwidth_gib_mean", "bandwidth_gib", "Memory bandwidth", "higher"),
+    MetricDefinition("exec_time", "exec_time", "Execution time", "lower"),
+    MetricDefinition("compile_time", "compile_time", "Compile time", "lower"),
+    MetricDefinition("binary_size", "binary_size", "Binary size", "lower"),
+    MetricDefinition("flops_gflops", "flops_gflops", "Throughput", "higher"),
+    MetricDefinition("bandwidth_gib", "bandwidth_gib", "Memory bandwidth", "higher"),
 )
 
 ANALYSIS_RECORD_COLUMNS = [
@@ -41,6 +41,7 @@ ANALYSIS_RECORD_COLUMNS = [
     "metric_source_column",
     "direction",
     "value",
+    "source_observations",
 ]
 
 SAMPLE_STATISTIC_COLUMNS = [
@@ -82,8 +83,8 @@ COMPARISON_COLUMNS = [
 ]
 
 
-def discover_aggregated_tables(base_dir: Path | str) -> list[Path]:
-    return sorted(Path(base_dir).expanduser().resolve().glob("parsed/*/benchmark_records_aggregated.csv"))
+def discover_parsed_tables(base_dir: Path | str) -> list[Path]:
+    return sorted(Path(base_dir).expanduser().resolve().glob("parsed/*/benchmark_records.csv"))
 
 
 def write_table(df: pd.DataFrame, output_file: Path | str) -> Path:
@@ -141,7 +142,7 @@ def _ensure_context_columns(df: pd.DataFrame, source_file: Path) -> pd.DataFrame
     return result
 
 
-def load_aggregated_tables(input_files: list[Path | str]) -> tuple[pd.DataFrame, list[str]]:
+def load_parsed_tables(input_files: list[Path | str]) -> tuple[pd.DataFrame, list[str]]:
     frames: list[pd.DataFrame] = []
     skipped: list[str] = []
 
@@ -164,9 +165,9 @@ def load_aggregated_tables(input_files: list[Path | str]) -> tuple[pd.DataFrame,
     return pd.concat(frames, ignore_index=True, sort=False), skipped
 
 
-def build_analysis_records(aggregated_df: pd.DataFrame) -> pd.DataFrame:
+def build_analysis_records(parsed_df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-    if aggregated_df.empty:
+    if parsed_df.empty:
         return pd.DataFrame(columns=ANALYSIS_RECORD_COLUMNS)
 
     base_columns = [
@@ -181,11 +182,16 @@ def build_analysis_records(aggregated_df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     for metric in METRICS:
-        if metric.column not in aggregated_df.columns:
+        if metric.column not in parsed_df.columns:
             continue
-        metric_df = aggregated_df[base_columns + [metric.column]].copy()
+        metric_df = parsed_df[base_columns + [metric.column]].copy()
         metric_df[metric.column] = pd.to_numeric(metric_df[metric.column], errors="coerce")
         metric_df = metric_df.dropna(subset=[metric.column])
+        metric_df = (
+            metric_df.groupby(base_columns, dropna=False)
+            .agg(value=(metric.column, "mean"), source_observations=(metric.column, "count"))
+            .reset_index()
+        )
         for record in metric_df.to_dict("records"):
             rows.append(
                 {
@@ -194,7 +200,8 @@ def build_analysis_records(aggregated_df: pd.DataFrame) -> pd.DataFrame:
                     "metric_display_name": metric.display_name,
                     "metric_source_column": metric.column,
                     "direction": metric.direction,
-                    "value": record[metric.column],
+                    "value": record["value"],
+                    "source_observations": record["source_observations"],
                 }
             )
 
@@ -375,7 +382,7 @@ def build_analysis_summary(
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "analysis_scope": "all retained aggregated benchmark results under auto/parsed",
+        "analysis_scope": "all retained parsed benchmark results under auto/parsed",
         "settings": {
             "change_threshold_percent": threshold_percent,
             "min_samples": min_samples,
@@ -409,4 +416,3 @@ def build_analysis_summary(
         },
         "classification_counts": classification_counts,
     }
-

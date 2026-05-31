@@ -32,7 +32,8 @@ For less common recovery targets, use the pass-through form. Snakemake will stil
 If raw benchmark results already exist and only derived outputs are missing, target the derived output directly. Snakemake will reuse existing raw results when their expected files and stamps are present:
 
 ```bash
-./run.sh -- auto/parsed/<experiment_id>/benchmark_records_aggregated.csv
+./run.sh -- auto/parsed/<experiment_id>/benchmark_records.csv
+./run.sh -- auto/analysis/analysis_summary.json
 ./run.sh -- auto/reports/<experiment_id>/benchmark_report.html
 ```
 

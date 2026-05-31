@@ -14,8 +14,8 @@ from workflow.lib.analysis import (
     build_analysis_summary,
     build_metric_comparisons,
     build_sample_statistics,
-    discover_aggregated_tables,
-    load_aggregated_tables,
+    discover_parsed_tables,
+    load_parsed_tables,
     split_top_changes,
     write_json,
     write_table,
@@ -23,13 +23,13 @@ from workflow.lib.analysis import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build report-ready analysis tables from aggregated results.")
+    parser = argparse.ArgumentParser(description="Build analysis tables from parsed benchmark results.")
     parser.add_argument("--base-dir", required=True, help="Workflow base directory containing parsed results.")
     parser.add_argument(
         "--input-file",
         action="append",
         default=[],
-        help="Aggregated benchmark CSV to include. May be repeated.",
+        help="Parsed benchmark CSV to include. May be repeated.",
     )
     parser.add_argument("--output-dir", required=True, help="Directory for analysis outputs.")
     parser.add_argument(
@@ -54,10 +54,10 @@ def main() -> int:
 
     input_files = [Path(path) for path in args.input_file]
     if not input_files:
-        input_files = discover_aggregated_tables(base_dir)
+        input_files = discover_parsed_tables(base_dir)
 
-    aggregated_df, skipped_inputs = load_aggregated_tables(input_files)
-    analysis_records = build_analysis_records(aggregated_df)
+    parsed_df, skipped_inputs = load_parsed_tables(input_files)
+    analysis_records = build_analysis_records(parsed_df)
     sample_statistics = build_sample_statistics(analysis_records)
     metric_comparisons = build_metric_comparisons(
         sample_statistics,

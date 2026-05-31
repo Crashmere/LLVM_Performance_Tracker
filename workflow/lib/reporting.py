@@ -17,17 +17,17 @@ def aggregate_benchmark_records(df: pd.DataFrame) -> pd.DataFrame:
     }
 
     valid_agg_rules = {key: value for key, value in agg_rules.items() if key in df.columns}
-    aggregated_df = df.groupby(group_keys, dropna=False).agg(valid_agg_rules).reset_index()
+    result_df = df.groupby(group_keys, dropna=False).agg(valid_agg_rules).reset_index()
 
     new_columns = []
-    for col in aggregated_df.columns:
+    for col in result_df.columns:
         if col[1] == "":
             new_columns.append(col[0])
         else:
             new_columns.append(f"{col[0]}_{col[1]}")
 
-    aggregated_df.columns = new_columns
-    return aggregated_df
+    result_df.columns = new_columns
+    return result_df
 
 
 def read_table(input_file: Path | str) -> pd.DataFrame:
@@ -40,22 +40,7 @@ def read_table(input_file: Path | str) -> pd.DataFrame:
     raise ValueError(f"Unsupported input format for {input_path}. Use .csv or .parquet.")
 
 
-def write_table(df: pd.DataFrame, output_file: Path | str) -> Path:
-    output_path = Path(output_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = output_path.suffix.lower()
-
-    if suffix == ".csv":
-        df.to_csv(output_path, index=False)
-    elif suffix == ".parquet":
-        df.to_parquet(output_path, index=False)
-    else:
-        raise ValueError(f"Unsupported output format for {output_path}. Use .csv or .parquet.")
-
-    return output_path
-
-
-def ensure_aggregated_records(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_report_records(df: pd.DataFrame) -> pd.DataFrame:
     if "exec_time_mean" in df.columns or "flops_gflops_mean" in df.columns:
         return df
     return aggregate_benchmark_records(df)

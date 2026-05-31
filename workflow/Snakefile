@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import re
 import shlex
 import sys
 
@@ -21,6 +22,7 @@ WORKFLOW_CONFIG = normalize_workflow_config(config)
 BASE_DIR = Path(WORKFLOW_CONFIG["project"]["base_dir"]).expanduser().resolve()
 EXPERIMENTS = WORKFLOW_CONFIG["experiments"]
 EXPERIMENTS_BY_ID = {experiment["experiment_id"]: experiment for experiment in EXPERIMENTS}
+EXPERIMENT_ID_PATTERN = "|".join(re.escape(experiment["experiment_id"]) for experiment in EXPERIMENTS)
 EXPERIMENT_LAYOUTS = {
     experiment["experiment_id"]: get_experiment_layout_paths(BASE_DIR, experiment)
     for experiment in EXPERIMENTS
@@ -31,15 +33,15 @@ FINAL_REPORTS = [
     str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["reports_run_dir"] / "benchmark_report.html")
     for experiment in EXPERIMENTS
 ]
-CURRENT_AGGREGATED = [
-    str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["parsed_run_dir"] / "benchmark_records_aggregated.csv")
+CURRENT_PARSED = [
+    str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["parsed_run_dir"] / "benchmark_records.csv")
     for experiment in EXPERIMENTS
 ]
-HISTORICAL_AGGREGATED = [
+HISTORICAL_PARSED = [
     str(path)
-    for path in sorted((BASE_DIR / "parsed").glob("*/benchmark_records_aggregated.csv"))
+    for path in sorted((BASE_DIR / "parsed").glob("*/benchmark_records.csv"))
 ]
-ANALYSIS_INPUTS = sorted(set(CURRENT_AGGREGATED).union(HISTORICAL_AGGREGATED))
+ANALYSIS_INPUTS = sorted(set(CURRENT_PARSED).union(HISTORICAL_PARSED))
 ANALYSIS_DIR = BASE_DIR / "analysis"
 ANALYSIS_OUTPUTS = {
     "analysis_records": str(ANALYSIS_DIR / "analysis_records.csv"),
@@ -67,6 +69,10 @@ rule all:
     input:
         FINAL_REPORTS,
         ANALYSIS_OUTPUTS["analysis_summary"],
+
+
+wildcard_constraints:
+    experiment_id=EXPERIMENT_ID_PATTERN,
 
 
 rule checkout_llvm:
@@ -269,21 +275,9 @@ rule write_experiment_metadata:
         "--output-file {output.metadata} > {log} 2>&1"
 
 
-rule aggregate_results:
+rule analyze:
     input:
-        parsed_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records.csv"),
-    output:
-        aggregated_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records_aggregated.csv"),
-    log:
-        str(BASE_DIR / "logs" / "{experiment_id}" / "aggregate_results.log"),
-    shell:
-        ".venv/bin/python workflow/scripts/aggregate_results_cli.py "
-        "--input-file {input.parsed_csv} --output-file {output.aggregated_csv} > {log} 2>&1"
-
-
-rule build_analysis_dataset:
-    input:
-        aggregated_csvs=ANALYSIS_INPUTS,
+        parsed_csvs=ANALYSIS_INPUTS,
     output:
         analysis_records=ANALYSIS_OUTPUTS["analysis_records"],
         sample_statistics=ANALYSIS_OUTPUTS["sample_statistics"],
@@ -292,17 +286,17 @@ rule build_analysis_dataset:
         top_improvements=ANALYSIS_OUTPUTS["top_improvements"],
         analysis_summary=ANALYSIS_OUTPUTS["analysis_summary"],
     log:
-        str(BASE_DIR / "logs" / "_analysis" / "build_analysis_dataset.log"),
+        str(BASE_DIR / "logs" / "_analysis" / "analyze.log"),
     params:
         base_dir=str(BASE_DIR),
         output_dir=str(ANALYSIS_DIR),
         threshold_percent=WORKFLOW_CONFIG["analysis"]["change_threshold_percent"],
         min_samples=WORKFLOW_CONFIG["analysis"]["min_samples"],
         input_args=lambda wildcards, input: " ".join(
-            f"--input-file {shlex.quote(path)}" for path in input.aggregated_csvs
+            f"--input-file {shlex.quote(path)}" for path in input.parsed_csvs
         ),
     shell:
-        ".venv/bin/python workflow/scripts/build_analysis_dataset.py "
+        ".venv/bin/python workflow/scripts/analyze.py "
         "--base-dir {params.base_dir} "
         "{params.input_args} "
         "--output-dir {params.output_dir} "
@@ -312,7 +306,7 @@ rule build_analysis_dataset:
 
 rule generate_report:
     input:
-        aggregated_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records_aggregated.csv"),
+        parsed_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records.csv"),
         metadata=str(BASE_DIR / "metadata" / "{experiment_id}" / "experiment.json"),
     output:
         html=str(BASE_DIR / "reports" / "{experiment_id}" / "benchmark_report.html"),
@@ -320,5 +314,5 @@ rule generate_report:
         str(BASE_DIR / "logs" / "{experiment_id}" / "generate_report.log"),
     shell:
         ".venv/bin/python workflow/scripts/generate_report_cli.py "
-        "--input-file {input.aggregated_csv} "
+        "--input-file {input.parsed_csv} "
         "--output-html {output.html} > {log} 2>&1"
