@@ -929,3 +929,258 @@ Introduce structured Official filters and RAJAPerf kernel selection and exclusio
 - Inclusion and exclusion can be combined to select a broad benchmark group while skipping individual tests or kernels.
 - I kept the raw argument fields as escape hatches for options that do not yet need dedicated configuration.
 - I moved selection normalization into a dedicated module and recorded both configured and resolved arguments in experiment metadata.
+
+### 阶段六：全量分析数据层
+
+这一阶段的目标，是在不增加第二套 report 命令、不引入独立 compare 工具的前提下，为后续可视化报告准备统一的分析数据层。系统现在仍然保持一条 Snakemake 主流水线，但在 parse 之后新增 `analyze` 步骤，默认扫描 `auto/parsed/` 中保留下来的全部可用 parsed 结果，并生成 `auto/analysis/` 下的结构化 CSV/JSON。
+
+阶段六只负责生成分析后的数据，不负责 HTML 展示。HTML 如何读取这些数据、如何展示 regression / improvement、如何交互过滤，留到阶段七处理。
+
+#### 主要设计决策
+
+- 删除单独的 `aggregate_results` 中间步骤。
+- `benchmark_records.csv` 成为 parsed 阶段唯一的事实表。
+- `analyze` 直接读取所有 `auto/parsed/*/benchmark_records.csv`。
+- 如果用户不希望某些历史结果进入分析，应删除对应 `auto/parsed/<experiment_id>/` 或相关结果目录，而不是传复杂筛选参数。
+- `sample` 是重复实验的独立维度，和 `label` 不混用。
+- `analysis.py` 会先在同一个 `experiment_id / label / sample / test / metric` 内归一为一个观测，避免同一个 sample 内的重复原始记录被误当成多个独立 sample。
+- `generate_report` 暂时仍生成现有单 experiment HTML，但不读取 `auto/analysis/`。
+- `rule all` 同时要求现有 report 和 `auto/analysis/analysis_summary.json`，所以正常运行主流水线会生成分析数据。
+
+#### 具体修改
+
+- `workflow/Snakefile`
+  - 删除 `rule aggregate_results`。
+  - 新增 `rule analyze`。
+  - `generate_report` 改为直接读取 `benchmark_records.csv`。
+  - 为当前配置展开出的 `experiment_id` 增加 wildcard 约束，避免 Snakemake 尝试重建历史 parsed 结果。
+
+- `workflow/scripts/analyze.py`
+  - 新增分析入口脚本。
+  - 从 `config.yml` 归一化后的 analysis 参数接收变化阈值和最小样本数。
+  - 读取 parsed CSV，写出 `auto/analysis/` 下的分析产物。
+
+- `workflow/lib/analysis.py`
+  - 新增全量分析逻辑。
+  - 负责发现 parsed 表、构建 analysis records、样本统计、metric 对比、top regression/improvement 和 summary。
+
+- `workflow/lib/reporting.py`
+  - 保留 report 内部临时聚合逻辑，仅用于当前 Plotly 图表。
+  - 移除文件级 aggregated 产物概念。
+
+- `workflow/scripts/generate_report_cli.py`
+  - 移除 `--aggregated-output`。
+  - 输入说明从 aggregated table 收敛为普通 benchmark table。
+
+- `workflow/scripts/write_experiment_metadata.py`
+  - metadata 不再记录 `benchmark_records_aggregated.csv`。
+  - metadata 中记录 analysis 输出路径和 `analyze` 日志路径。
+
+- `tools/inspect_workflow_outputs.py`
+  - inspect 输出不再包含 `aggregated` 列。
+  - 当前只检查 metadata、shared deps、raw results、parsed 和 report。
+
+- `docs/recovery.md`
+  - 恢复命令示例改为 parsed、analysis summary 和 report target。
+
+- `config.yml`
+  - 新增 analysis 配置：
+
+```yaml
+analysis:
+  change_threshold_percent: 5.0
+  min_samples: 1
+```
+
+#### Analysis 产物总览
+
+阶段六会在 `auto/analysis/` 下生成以下文件：
+
+- `analysis_records.csv`
+- `sample_statistics.csv`
+- `metric_comparisons.csv`
+- `top_regressions.csv`
+- `top_improvements.csv`
+- `analysis_summary.json`
+
+数据流可以理解为：
+
+```text
+auto/parsed/*/benchmark_records.csv
+  -> analysis_records.csv
+  -> sample_statistics.csv
+  -> metric_comparisons.csv
+  -> top_regressions.csv / top_improvements.csv
+  -> analysis_summary.json
+```
+
+#### `analysis_records.csv`
+
+这是最底层的分析事实表。它把所有 parsed 结果中的可用指标展开成长表，一行表示某个 experiment/sample 中某个 test 的某个 metric。
+
+字段说明：
+
+- `experiment_id`：来源 experiment 的唯一 ID，来自 parsed 文件所在目录名。
+- `source_file`：该行数据来自哪个 `benchmark_records.csv`。
+- `suite_name`：测试套件名，当前主要是 `official` 或 `raja`。
+- `suite_version`：测试套件版本，例如 `llvmorg-21.1.0`、`v2025.12.0` 或某个 commit hash。
+- `compiler_version`：编译器版本或标签，例如 `llvmorg-21.1.0`。
+- `label`：实验组标签。可能是自动时间戳，也可能是用户手写标签。
+- `sample`：重复实验样本编号，例如 `sample_1`、`sample_2`、`sample_3`。
+- `test_name`：测试名或 RAJA kernel 名。
+- `metric`：标准化指标名，当前可能是 `exec_time`、`compile_time`、`binary_size`、`flops_gflops`、`bandwidth_gib`。
+- `metric_display_name`：面向展示的指标名，例如 `Execution time`、`Compile time`、`Binary size`、`Throughput`、`Memory bandwidth`。
+- `metric_source_column`：该指标来自 parsed 表中的哪一列。
+- `direction`：指标方向。`lower` 表示越低越好，`higher` 表示越高越好。
+- `value`：该 metric 的数值。
+- `source_observations`：同一个 experiment/sample/test/metric 内有多少条原始记录被合成为这个值。通常是 `1`。
+
+#### `sample_statistics.csv`
+
+这是样本统计表。它基于 `analysis_records.csv`，按 `suite_name / suite_version / compiler_version / test_name / metric` 汇总多个 label/sample 观测。
+
+字段说明：
+
+- `suite_name`：测试套件名。
+- `suite_version`：测试套件版本。
+- `compiler_version`：编译器版本。
+- `test_name`：测试名或 kernel 名。
+- `metric`：指标名。
+- `metric_display_name`：展示名。
+- `direction`：指标方向，`lower` 或 `higher`。
+- `observations`：参与统计的观测数量。
+- `labels`：这些观测来自哪些 label，多个值用逗号连接。
+- `samples`：这些观测来自哪些 sample，多个值用逗号连接。
+- `mean`：观测值平均值。
+- `std`：样本标准差。只有一个观测时通常为空。
+- `cv`：变异系数，计算为 `std / abs(mean)`，用于粗略观察波动比例。
+- `ci95_low`：95% 置信区间下界，当前使用轻量公式 `mean - 1.96 * std / sqrt(n)`。
+- `ci95_high`：95% 置信区间上界，当前使用轻量公式 `mean + 1.96 * std / sqrt(n)`。
+
+#### `metric_comparisons.csv`
+
+这是变化对比表。它基于 `sample_statistics.csv`，对同一个 `suite_name / test_name / metric` 下的不同版本组合做两两比较。
+
+字段说明：
+
+- `suite_name`：测试套件名。
+- `test_name`：测试名或 kernel 名。
+- `metric`：指标名。
+- `metric_display_name`：展示名。
+- `direction`：指标方向。
+- `baseline_compiler_version`：baseline 编译器版本。
+- `baseline_suite_version`：baseline suite 版本。
+- `candidate_compiler_version`：candidate 编译器版本。
+- `candidate_suite_version`：candidate suite 版本。
+- `baseline_observations`：baseline 侧观测数量。
+- `candidate_observations`：candidate 侧观测数量。
+- `baseline_mean`：baseline 平均值。
+- `candidate_mean`：candidate 平均值。
+- `raw_change_percent`：原始变化百分比，计算为 `(candidate - baseline) / abs(baseline) * 100`。
+- `normalized_change_percent`：按指标方向归一后的变化。正数表示变差，负数表示变好。
+- `classification`：变化分类。
+- `evidence`：分类依据。
+
+`classification` 的可能值：
+
+- `stable`：变化幅度低于阈值。
+- `candidate_regression`：超过阈值，且按指标方向看是变差，但证据还不够强。
+- `candidate_improvement`：超过阈值，且按指标方向看是变好，但证据还不够强。
+- `reliable_regression`：样本数足够，且 95% CI 不重叠，判断为相对可靠的变差。
+- `reliable_improvement`：样本数足够，且 95% CI 不重叠，判断为相对可靠的变好。
+
+`evidence` 的可能值：
+
+- `below_threshold`：变化幅度低于 `analysis.change_threshold_percent`。
+- `insufficient_samples`：某一侧观测数量低于 `analysis.min_samples`。
+- `missing_ci`：缺少置信区间，通常因为某侧只有一个观测，无法计算标准差。
+- `ci95_overlapping`：两侧 95% CI 重叠，不能认为变化可靠。
+- `ci95_non_overlapping`：两侧 95% CI 不重叠，证据相对更强。
+
+#### `top_regressions.csv`
+
+这是从 `metric_comparisons.csv` 中筛选出的 top regression 表，字段与 `metric_comparisons.csv` 完全相同。
+
+生成逻辑：
+
+- 保留 `classification` 以 `regression` 结尾的行。
+- 按 `normalized_change_percent` 从大到小排序。
+- 默认保留前 50 行。
+
+解释方式：
+
+- 对 `lower` 指标，例如 `exec_time`，数值上升通常是 regression。
+- 对 `higher` 指标，例如 `flops_gflops`，数值下降通常是 regression。
+- `normalized_change_percent` 越大，表示退化越明显。
+
+#### `top_improvements.csv`
+
+这是从 `metric_comparisons.csv` 中筛选出的 top improvement 表，字段与 `metric_comparisons.csv` 完全相同。
+
+生成逻辑：
+
+- 保留 `classification` 以 `improvement` 结尾的行。
+- 按 `normalized_change_percent` 从小到大排序。
+- 默认保留前 50 行。
+
+解释方式：
+
+- 对 `lower` 指标，例如 `exec_time`，数值下降通常是 improvement。
+- 对 `higher` 指标，例如 `flops_gflops`，数值上升通常是 improvement。
+- `normalized_change_percent` 越小，表示改善越明显。
+
+#### `analysis_summary.json`
+
+这是整次 analysis 的摘要文件，适合后续阶段七作为报告首页、数据完整性检查或调试信息来源。
+
+字段说明：
+
+- `analysis_scope`：本次分析范围。当前含义是扫描 `auto/parsed` 下保留的 parsed benchmark 结果。
+- `generated_at`：生成时间，UTC ISO 格式。
+- `settings.change_threshold_percent`：变化阈值。低于该百分比的变化会归为 `stable`。
+- `settings.min_samples`：可靠变化所需的最小观测数。
+- `inputs.count`：纳入分析的 parsed CSV 文件数量。
+- `inputs.skipped`：被跳过的输入及原因。
+- `records.analysis_records`：`analysis_records.csv` 行数。
+- `records.sample_statistics`：`sample_statistics.csv` 行数。
+- `records.metric_comparisons`：`metric_comparisons.csv` 行数。
+- `records.top_regressions`：`top_regressions.csv` 行数。
+- `records.top_improvements`：`top_improvements.csv` 行数。
+- `coverage.suites`：本次覆盖的 suite。
+- `coverage.compiler_versions`：覆盖的编译器版本。
+- `coverage.labels`：覆盖的实验标签。
+- `coverage.samples`：覆盖的 sample 名。
+- `classification_counts`：`metric_comparisons.csv` 中不同 `classification` 的数量统计。
+
+#### 关于 aggregated 中间产物的结论
+
+- 阶段六开发过程中确认，原先 `benchmark_records_aggregated.csv` 与 `benchmark_records.csv` 在当前数据形态下大多是一一对应的。
+- 真正有意义的跨 sample / 跨历史结果聚合发生在 analysis 阶段。
+- 因此当前代码删除了 `aggregate_results` rule 和 `workflow/scripts/aggregate_results_cli.py`。
+- 如果 report 需要临时聚合，它会在内存中从 parsed 表生成，不再写出单独 aggregated 文件。
+- 磁盘上已有的旧 `benchmark_records_aggregated.csv` 不会被新代码使用；如果不需要保留，可以由用户手动清理。
+
+#### 验证与结果
+
+- 已执行 `py_compile` 检查受影响 Python 模块。
+- 已执行 `git diff --check` 检查格式。
+- 已验证 `workflow/scripts/analyze.py` 可以基于现有 parsed 数据生成 `auto/analysis` 结构。
+- 已验证 `generate_report_cli.py` 可以直接基于 `benchmark_records.csv` 生成 report。
+- 已执行 `./run.sh dry-run` 验证 Snakemake DAG。
+- 当前 DAG 不再包含 `aggregate_results`，而是包含 `analyze`。
+- 已执行 `./run.sh inspect --format json`，确认 inspect 输出中不再包含 `aggregated` 字段。
+- 已实际运行一次 workflow 并成功生成 `auto/analysis/` 结果。
+
+#### Commit Message
+
+Add workflow analysis data layer.
+Introduce the Snakemake `analyze` stage to build report-ready analysis tables from retained parsed results, remove the redundant aggregated CSV stage, add sample statistics and metric comparison outputs, and keep HTML rendering separate for the next reporting phase.
+
+#### Weekly Update
+
+- This week I added the analysis data layer that scans retained parsed benchmark results and produces structured CSV/JSON outputs under `auto/analysis`.
+- I removed the redundant aggregated CSV stage so `benchmark_records.csv` is now the single parsed fact table.
+- I added sample-level statistics, normalized metric comparisons, and top regression/improvement tables.
+- I kept the design Snakemake-first: users still run the normal pipeline, and analysis is generated as part of the DAG.
+- I deliberately kept HTML consumption of the analysis data out of this stage, leaving visualization and report integration for the next phase.
+- I updated metadata, recovery notes, and inspect output to match the simplified parse/analyze/report flow.
