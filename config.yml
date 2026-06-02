@@ -8,7 +8,7 @@ project:
 
 # Number of independent samples to run for each experiment configuration.
 samples:
-  count: 1
+  count: 3
 
 build:
   ninja_jobs: 6
@@ -17,7 +17,7 @@ build:
 
 analysis:
   change_threshold_percent: 5.0
-  min_samples: 2
+  min_samples: 1
 
 repositories:
   llvm: "https://github.com/llvm/llvm-project.git"
@@ -35,31 +35,31 @@ suite_defaults:
   raja:
     cxx_standard: "17"
 
-# test_selection:
-#   official:
-#     filters:
-#       - "TSVC"
-#     lit_args: []
-#   raja:
-#     kernels:
-#       - "Basic_DAXPY"
-#     extra_args: []
-
-# Example: exclude selected tests or kernels instead.
-
 test_selection:
   official:
     filters:
       - "TSVC"
-    excluded:
-      - "TSVC/Loop"
     lit_args: []
   raja:
     kernels:
-      - "Basic"
-    excluded:
       - "Basic_DAXPY"
     extra_args: []
+
+# Example: exclude selected tests or kernels instead.
+
+# test_selection:
+#   official:
+#     filters:
+#       - "TSVC"
+#     excluded:
+#       - "TSVC/Loop"
+#     lit_args: []
+#   raja:
+#     kernels:
+#       - "Basic"
+#     excluded:
+#       - "Basic_DAXPY"
+#     extra_args: []
 
 
 # Mode 1: simple matrix mode.
