@@ -739,7 +739,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 阶段六的目标是为后续 HTML report 构建 report-ready analysis data layer：
 
-- Snakemake 主流水线完成 benchmark、parse、aggregate、analysis 数据生成。
+- Snakemake 主流水线完成 benchmark、parse、analyze 数据生成。
 - 系统默认扫描并分析当前 `auto/` 中保留下来的全部可用结果。
 - 用户如果不希望某些结果进入分析，应删除对应产物，而不是通过复杂命令手工筛选。
 - analysis layer 只产出结构化 CSV/JSON；HTML 读取和展示放到阶段七。
@@ -772,44 +772,34 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ### 具体修改内容
 
-#### 阶段 6A：sample 维度进入主流水线
-
-1. 提供重复实验配置：
+1. 增加重复实验 sample 维度。
    - 设计应避免重新引入多个标签概念。
    - 使用独立的 `sample` 字段标识同一实验组中的不同观测，不复用 `label`。
-   - 如果需要自动展开多次运行，新增清晰的 sample 数量配置。
-   - 可考虑支持 `warmup_runs`。
+   - 通过清晰的 sample 数量配置自动展开多次运行。
 
-2. 将结果组织为统计样本组：
-   - 同一版本、同一 suite、同一 selection 和同一环境下的多个 sample 归入同一组。
-   - 每条原始记录保留所属 `experiment_id`、`label` 和 `sample`。
-   - 聚合时不能丢失样本数量和 provenance。
-
-3. 记录噪声控制元数据：
-   - CPU 型号
-   - 核数
-   - 负载快照
-   - 内存大小
-   - 线程数
-   - OpenMP 环境变量
-
-#### 阶段 6B：全量 analysis dataset
-
-1. 新增 Snakemake rule：`analyze`。
-2. 输入为当前 workflow 已生成的 parsed CSV，以及 `auto/parsed/` 中已存在且可用的历史 parsed CSV。
-3. 默认纳入所有可用结果：
+2. 新增 Snakemake `analyze` rule。
+   - 输入为当前 workflow 生成的 parsed CSV，以及 `auto/parsed/` 中已存在且可用的历史 parsed CSV。
+   - 默认纳入所有可用结果。
    - 不要求用户手写复杂历史 experiment 列表。
    - 不满意或不想纳入的结果由用户从 `auto/` 中删除。
-4. 输出 report-ready tables：
+
+3. 删除冗余 aggregated 中间层。
+   - `benchmark_records.csv` 是 parsed 阶段唯一事实表。
+   - 不再生成或依赖 `benchmark_records_aggregated.csv`。
+   - 如果 report 暂时需要聚合数据，只在内存中从 parsed 表临时生成。
+
+4. 生成 report-ready analysis tables。
    - `auto/analysis/analysis_records.csv`
    - `auto/analysis/sample_statistics.csv`
    - `auto/analysis/metric_comparisons.csv`
    - `auto/analysis/top_regressions.csv`
    - `auto/analysis/top_improvements.csv`
    - `auto/analysis/analysis_summary.json`
+
 5. analysis records 至少保留：
    - `experiment_id`
-   - `llvm_tag` / `compiler_version`
+   - `source_file`
+   - `compiler_version`
    - `suite_name`
    - `suite_version`
    - `test_name`
@@ -817,22 +807,29 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - `label`
    - `sample`
    - `value`
+   - `source_observations`
 
-#### 阶段 6C：report-ready 变化分析
-
-1. 基于全量 analysis dataset 扩展轻量统计分析：
+6. 基于全量 analysis dataset 生成轻量统计结果。
    - 均值
    - 标准差
    - 变异系数
    - 置信区间
+   - regression / improvement 分类
+   - stable / candidate / reliable 状态
 
-2. 对比时区分：
-   - 单次观测或样本不足时的候选变化
-   - 超过阈值但统计证据不足的变化
-   - 置信区间不重叠且样本数足够时的相对可靠 regression / improvement
+7. 记录噪声控制元数据。
+   - CPU 型号
+   - 核数
+   - 负载快照
+   - 内存大小
+   - 线程数
+   - OpenMP 环境变量
 
-3. 所有分析结果都写成结构化 CSV/JSON，而不是另起命令生成独立文字报告。
-4. 差异计算、样本聚合和轻量统计判断放在 `analysis.py` 中；`reporting.py` 暂不读取这些数据。
+8. 保持阶段边界清晰。
+   - 所有分析结果都写成结构化 CSV/JSON，而不是另起命令生成独立文字报告。
+   - 差异计算、样本聚合和轻量统计判断放在 `analysis.py` 中。
+   - `reporting.py` 和 `generate_report_cli.py` 暂不读取 analysis 数据。
+   - HTML 读取、展示和交互过滤放到阶段七。
 
 ### 验收标准
 
