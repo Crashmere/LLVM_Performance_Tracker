@@ -846,7 +846,9 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ### 目标
 
-落实报告中的 Task 1.6 和 Future Work 中的高级展示能力，让报告从演示图升级为分析界面。
+落实报告中的 Task 1.6 和 Future Work 中的高级展示能力，让报告从单个 experiment 的演示图升级为面向全量 analysis dataset 的静态 HTML 分析报告。
+
+阶段七的核心目标不是再增加一套运行入口，而是让主 Snakemake 流水线最终生成一个可归档、可离线打开、能解释阶段六分析结果的 HTML report。
 
 ### 当前差距
 
@@ -854,67 +856,185 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 缺少筛选、搜索、对比和失败项展示。
 - 尚未突出多版本、多轮次、变化阈值分析的价值。
 - 报告入口仍主要围绕单个 experiment 输出，尚未消费阶段六生成的全量 analysis tables。
+- `workflow/lib/reporting.py` 同时包含 table 读取、临时聚合和 Plotly 布局，后续继续堆功能会变得难维护。
+- `generate_report_cli.py` 目前只接受单个 benchmark table，不能表达全局 analysis report 的输入。
 
 ### 需要完成的功能
 
-- 改进静态 HTML 报告。
-- 增加交互过滤和多视图展示。
-- 如果时间允许，再追加轻量 Web App。
-- 将阶段六的全量 analysis dataset 接入并渲染成最终 HTML report。
+- 新增或改造为一个全局静态 HTML analysis report。
+- 将阶段六的 `auto/analysis/` 产物接入 report。
+- 报告默认反映 `auto/` 中保留下来的全部可用结果。
+- 提供结果总览、回归/改善榜单、suite 视图和指标分布视图。
+- 提供轻量交互能力：搜索、排序、折叠/展开、Plotly hover/zoom、表格筛选。
 - 保持单一 Snakemake 主流水线；不要引入额外 `run.sh report` 或复杂手工选择入口作为主线。
+- 暂不开发 Streamlit/Dash Web App；如果静态报告已经不足，再作为后续阶段单独规划。
 
 ### 需要修改/新增的代码或文件
 
-  - `workflow/lib/reporting.py`
-  - `workflow/scripts/generate_report_cli.py`
+- 修改：
   - `workflow/Snakefile`
-  - 可能新增：
+  - `workflow/scripts/generate_report_cli.py`
+  - `workflow/lib/reporting.py`
+- 建议新增：
+  - `workflow/lib/report_data.py`
   - `workflow/lib/report_views.py`
-  - `app/streamlit_app.py` 或 `app/dash_app.py`
+
+### 输入与输出设计
+
+1. 报告输入来自阶段六 analysis 产物：
+   - `auto/analysis/analysis_records.csv`
+   - `auto/analysis/sample_statistics.csv`
+   - `auto/analysis/metric_comparisons.csv`
+   - `auto/analysis/top_regressions.csv`
+   - `auto/analysis/top_improvements.csv`
+   - `auto/analysis/analysis_summary.json`
+
+2. 默认输出建议改为一个全局报告：
+   - `auto/reports/analysis_report.html`
+
+3. Snakemake 关系：
+   - `analyze` 生成 `auto/analysis/*`。
+   - `generate_report` 读取 `auto/analysis/*`。
+   - `rule all` 以全局 HTML report 作为最终主产物。
+   - 单 experiment report 可以暂时保留为旧调试能力，但不再作为阶段七主线。
+
+4. CLI 边界：
+   - `generate_report_cli.py` 不再只接收 `--input-file`。
+   - 改为接收 `--analysis-dir` 或显式 analysis 文件路径。
+   - 不提供复杂 baseline/candidate 命令行选择；报告内从已生成表格中展示和过滤。
 
 ### 具体修改内容
 
-1. 静态报告至少增加以下视图：
-   - 版本总览页
-   - Official suite 视图
-   - RAJA 视图
-   - 回归/改善排行榜
-   - 失败与缺失结果视图
+1. 拆分 report 代码职责。
+   - `report_data.py` 负责读取 analysis CSV/JSON。
+   - `report_data.py` 负责做轻量展示前整理，例如列选择、数量统计、表格截断。
+   - `report_views.py` 负责生成 Plotly figure 和 HTML section。
+   - `reporting.py` 负责把各 section 组装成完整 HTML。
+   - `generate_report_cli.py` 只负责解析参数、调用 report 生成函数和写文件。
 
-2. 图表建议：
-   - 多版本柱状图替代部分折线图
-   - 盒图/小提琴图展示重复运行分布
-   - 热力图展示版本-测试矩阵
-   - 散点图展示性能与编译时间/二进制大小的关系
+2. 报告首页 / 总览视图。
+   - 数据来源：`analysis_summary.json`。
+   - 展示纳入分析的 parsed 文件数量。
+   - 展示 analysis records、sample groups、metric comparisons 数量。
+   - 展示覆盖的 suite、compiler version、label、sample。
+   - 展示 `classification_counts`。
+   - 展示 analysis 设置，例如变化阈值和 `min_samples`。
+   - 目的：让用户一眼判断报告覆盖范围是否符合预期。
 
-3. 交互能力：
-   - 按 suite 过滤
-   - 按 kernel/test_name 搜索
-   - 按 metric 切换
-   - 按版本选择 baseline/candidate
-   - 仅显示显著变化项
+3. 回归与改善排行榜。
+   - 数据来源：`top_regressions.csv`、`top_improvements.csv`。
+   - 展示 top N regression / improvement 表格。
+   - 用颜色区分 regression、improvement、stable。
+   - 明确展示 `normalized_change_percent`，并说明正数为变差、负数为变好。
+   - 展示 `classification` 和 `evidence`，避免把 candidate 误读为强统计结论。
+   - 目的：作为报告最重要的入口，帮助用户快速定位值得关注的变化。
 
-4. 视觉与可读性增强：
-   - 明确标注 lower-is-better / higher-is-better
-   - 用颜色高亮 regression / improvement
-   - 增加数据表导出按钮
+4. Metric comparison 视图。
+   - 数据来源：`metric_comparisons.csv`。
+   - 增加按 suite、metric、classification 的过滤。
+   - 增加 test/kernel 名搜索。
+   - 增加按变化幅度排序的表格。
+   - 可视化建议：
+     - regression/improvement 条形图。
+     - classification counts 堆叠条形图。
+     - suite x metric 的变化数量热力图。
+   - 目的：让用户从 top 列表下钻到完整 comparison 数据。
 
-5. 如果进入 Web App 阶段：
-   - 首选 Streamlit，降低维护成本。
-   - 页面聚焦结果筛选与对比，不做复杂后端。
+5. Sample statistics 视图。
+   - 数据来源：`sample_statistics.csv`。
+   - 展示每个 test/metric 的 `observations`、`mean`、`std`、`cv`、`ci95_low/high`。
+   - 可视化建议：
+     - CV 排行榜，用于发现噪声较大的测试。
+     - observations 分布，用于确认哪些测试样本不足。
+     - 置信区间图，用于解释 reliable/candidate 分类。
+   - 目的：说明变化判断背后的样本稳定性，帮助区分真实变化和噪声。
 
-6. 增加历史报告工作流：
-   - 报告输入来自阶段六的 `auto/analysis/` 产物。
-   - 将聚合分析逻辑与 Plotly 视图生成解耦，避免 `reporting.py` 同时承担 table IO、统计聚合和可视化布局。
-   - 报告模块只负责渲染 analysis tables。
-   - 报告首页展示纳入分析的结果数量、版本数量、sample 数量和生成时间。
+6. Suite 视图。
+   - Official 视图聚焦 execution time、compile time、binary size。
+   - RAJA 视图聚焦 execution time、GFLOP/s、bandwidth。
+   - 每个 suite 视图至少包含：
+     - 指标摘要。
+     - top regression/improvement。
+     - 高噪声测试列表。
+     - 可搜索明细表。
+   - 目的：避免 Official 和 RAJA 数据混在一起难以解释。
+
+7. 明细数据视图。
+   - 数据来源：`analysis_records.csv`。
+   - 默认不完整渲染全部行，避免 HTML 过大。
+   - 只展示采样或前 N 行，并提供数据文件路径说明。
+   - 展示字段含义链接或简短说明。
+   - 目的：提供 provenance 和 debug 入口，而不是替代 CSV 分析。
+
+8. 失败与缺失结果视图。
+   - 第一版可先不做复杂失败分析。
+   - 如果需要，优先利用 metadata / inspect 结果展示缺失 raw、parsed 或 report 的 experiment。
+   - 不在 report 阶段重新扫描或推断 Snakemake 状态。
+   - 目的：避免 report 模块变成第二套 inspect 工具。
+
+9. 静态交互实现策略。
+   - Plotly 图表使用内嵌 JS，保持离线可打开。
+   - HTML 表格使用轻量原生 JavaScript 实现搜索和分类筛选。
+   - 不引入大型前端框架。
+   - 不依赖外部 CDN。
+   - 表格导出第一版可通过直接链接到 CSV 文件实现，不必在浏览器端重新生成 CSV。
+
+10. 视觉与解释性要求。
+   - 明确标注 lower-is-better / higher-is-better。
+   - 所有百分比变化都说明 raw 与 normalized 的区别。
+   - candidate / reliable 必须视觉区分，避免过度声称统计显著性。
+   - 报告首页说明：分析默认包含 `auto/` 中保留的全部 parsed 结果。
+   - 提醒用户如需排除结果，应删除不想纳入的历史产物后重跑。
+
+### 建议实施顺序
+
+1. 第一轮：接入 analysis 数据。
+   - 新增 `report_data.py`。
+   - 修改 `generate_report_cli.py` 读取 `--analysis-dir`。
+   - 修改 `Snakefile`，让 report 依赖 `ANALYSIS_OUTPUTS`。
+   - 生成最小 HTML：summary cards + top regression/improvement tables。
+
+2. 第二轮：重构 HTML 组装。
+   - 新增 `report_views.py`。
+   - 将 Plotly figure 构造从 `reporting.py` 拆出。
+   - 建立统一 HTML layout、CSS 和 section 结构。
+
+3. 第三轮：增加核心图表。
+   - classification counts。
+   - top normalized change bar charts。
+   - sample CV / observations 图表。
+   - suite-level summary。
+
+4. 第四轮：增加静态交互。
+   - 表格搜索。
+   - suite / metric / classification 过滤。
+   - section 折叠/展开。
+   - CSV 文件路径链接。
+
+5. 第五轮：清理旧单 experiment report 路径。
+   - 决定是否保留旧 `generate_pure_plotly_report()` 作为调试辅助。
+   - 如果不再需要，将默认 `FINAL_REPORTS` 切换为全局 `analysis_report.html`。
+   - 更新 metadata 中 report 路径说明。
+
+### 暂不进入本阶段的内容
+
+- 不做 Streamlit / Dash 应用。
+- 不新增 `./run.sh report`。
+- 不提供复杂命令行筛选历史结果。
+- 不在 report 阶段重新计算 statistics。
+- 不在 report 阶段修改 analysis 数据。
+- 不把整份 `analysis_records.csv` 全量渲染进 HTML。
 
 ### 验收标准
 
-- 静态报告不再局限于两个固定图。
-- 用户能在报告中快速定位某个 kernel 或某类 benchmark。
-- 回归和改善项在界面上可直接识别。
-- HTML report 默认反映当前 `auto/` 中保留下来的全部可用结果。
+- 主 Snakemake 流水线能生成全局 HTML analysis report。
+- HTML report 使用阶段六的 `auto/analysis/` 产物作为主要输入。
+- 报告首页能说明本次分析覆盖范围、输入数量、样本数量和变化分类数量。
+- 用户能在报告中快速定位 top regression 和 top improvement。
+- 用户能按 suite、metric、classification 或 test/kernel 名查看 comparison 结果。
+- 报告能展示样本数量、波动和 CI 信息，帮助解释 candidate / reliable 分类。
+- 报告离线可打开，不依赖外部 CDN。
+- 第七阶段完成后，默认 HTML report 反映当前 `auto/` 中保留下来的全部可用 parsed 结果。
 
 ---
 
