@@ -29,8 +29,9 @@ EXPERIMENT_LAYOUTS = {
 }
 EXCLUSIVE_BENCHMARK_THREADS = 9999
 
-FINAL_REPORTS = [
-    str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["reports_run_dir"] / "benchmark_report.html")
+ANALYSIS_REPORT = str(BASE_DIR / "reports" / "analysis_report.html")
+METADATA_OUTPUTS = [
+    str(EXPERIMENT_LAYOUTS[experiment["experiment_id"]]["metadata_run_dir"] / "experiment.json")
     for experiment in EXPERIMENTS
 ]
 CURRENT_PARSED = [
@@ -67,8 +68,8 @@ def layout_from_experiment_id(experiment_id):
 
 rule all:
     input:
-        FINAL_REPORTS,
-        ANALYSIS_OUTPUTS["analysis_summary"],
+        ANALYSIS_REPORT,
+        METADATA_OUTPUTS,
 
 
 wildcard_constraints:
@@ -306,13 +307,19 @@ rule analyze:
 
 rule generate_report:
     input:
-        parsed_csv=str(BASE_DIR / "parsed" / "{experiment_id}" / "benchmark_records.csv"),
-        metadata=str(BASE_DIR / "metadata" / "{experiment_id}" / "experiment.json"),
+        analysis_records=ANALYSIS_OUTPUTS["analysis_records"],
+        sample_statistics=ANALYSIS_OUTPUTS["sample_statistics"],
+        metric_comparisons=ANALYSIS_OUTPUTS["metric_comparisons"],
+        top_regressions=ANALYSIS_OUTPUTS["top_regressions"],
+        top_improvements=ANALYSIS_OUTPUTS["top_improvements"],
+        analysis_summary=ANALYSIS_OUTPUTS["analysis_summary"],
     output:
-        html=str(BASE_DIR / "reports" / "{experiment_id}" / "benchmark_report.html"),
+        html=ANALYSIS_REPORT,
     log:
-        str(BASE_DIR / "logs" / "{experiment_id}" / "generate_report.log"),
+        str(BASE_DIR / "logs" / "_analysis" / "generate_report.log"),
+    params:
+        analysis_dir=str(ANALYSIS_DIR),
     shell:
         ".venv/bin/python workflow/scripts/generate_report_cli.py "
-        "--input-file {input.parsed_csv} "
+        "--analysis-dir {params.analysis_dir} "
         "--output-html {output.html} > {log} 2>&1"

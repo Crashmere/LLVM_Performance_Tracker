@@ -9,30 +9,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workflow.lib.reporting import (
-    generate_pure_plotly_report,
-    prepare_report_records,
-    read_table,
-)
+from workflow.lib.report_data import load_analysis_report_data
+from workflow.lib.report_views import render_analysis_report
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate an HTML report from parsed benchmark records.")
-    parser.add_argument("--input-file", required=True, help="Input .csv or .parquet benchmark table.")
+    parser = argparse.ArgumentParser(description="Generate an HTML report from workflow analysis outputs.")
+    parser.add_argument("--analysis-dir", required=True, help="Directory containing analysis CSV/JSON files.")
     parser.add_argument("--output-html", required=True, help="Output HTML report path.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    input_path = Path(args.input_file)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Expected benchmark table does not exist: {input_path}")
-
-    input_df = read_table(args.input_file)
-    report_df = prepare_report_records(input_df)
-
-    report_path = generate_pure_plotly_report(report_df, args.output_html)
+    data = load_analysis_report_data(args.analysis_dir)
+    report_path = Path(args.output_html)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_analysis_report(data, report_path), encoding="utf-8")
     print(f"Report generated successfully at: {report_path.resolve()}")
     return 0
 

@@ -126,7 +126,7 @@ def build_metadata(
             "raja_kernel_run_data": str(layout["raja_result"] / "RAJAPerf-kernel-run-data.csv"),
             "raja_timing_average": str(layout["raja_result"] / "RAJAPerf-timing-Average.csv"),
             "parsed_csv": str(layout["parsed_run_dir"] / "benchmark_records.csv"),
-            "report_html": str(layout["reports_run_dir"] / "benchmark_report.html"),
+            "report_html": str(base_dir / "reports" / "analysis_report.html"),
             "metadata_json": str(layout["metadata_run_dir"] / "experiment.json"),
             "analysis_records": str(base_dir / "analysis" / "analysis_records.csv"),
             "sample_statistics": str(base_dir / "analysis" / "sample_statistics.csv"),
@@ -138,7 +138,7 @@ def build_metadata(
         "logs": {
             "parse_results": str(layout["logs_run_dir"] / "parse_results.log"),
             "analyze": str(base_dir / "logs" / "_analysis" / "analyze.log"),
-            "generate_report": str(layout["logs_run_dir"] / "generate_report.log"),
+            "generate_report": str(base_dir / "logs" / "_analysis" / "generate_report.log"),
             "run_official": str(
                 base_dir
                 / "logs"

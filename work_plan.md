@@ -746,7 +746,6 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ### 当前差距
 
-- `workflow/lib/reporting.py` 只能对单张 parsed 表中的重复记录做基础 `mean/std/count` 聚合。
 - 尚无统一的全量 analysis dataset。
 - 尚无版本间差异计算、阈值过滤、回归/改善榜单。
 - 当前系统只保留一个全局 `label`，还需要独立的 sample 维度支撑重复实验。
@@ -828,7 +827,6 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 8. 保持阶段边界清晰。
    - 所有分析结果都写成结构化 CSV/JSON，而不是另起命令生成独立文字报告。
    - 差异计算、样本聚合和轻量统计判断放在 `analysis.py` 中。
-   - `reporting.py` 和 `generate_report_cli.py` 暂不读取 analysis 数据。
    - HTML 读取、展示和交互过滤放到阶段七。
 
 ### 验收标准
@@ -856,7 +854,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 缺少筛选、搜索、对比和失败项展示。
 - 尚未突出多版本、多轮次、变化阈值分析的价值。
 - 报告入口仍主要围绕单个 experiment 输出，尚未消费阶段六生成的全量 analysis tables。
-- `workflow/lib/reporting.py` 同时包含 table 读取、临时聚合和 Plotly 布局，后续继续堆功能会变得难维护。
+- 旧报告逻辑同时包含 table 读取、临时聚合和 Plotly 布局，后续继续堆功能会变得难维护。
 - `generate_report_cli.py` 目前只接受单个 benchmark table，不能表达全局 analysis report 的输入。
 
 ### 需要完成的功能
@@ -865,7 +863,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 将阶段六的 `auto/analysis/` 产物接入 report。
 - 报告默认反映 `auto/` 中保留下来的全部可用结果。
 - 提供结果总览、回归/改善榜单、suite 视图和指标分布视图。
-- 提供轻量交互能力：搜索、排序、折叠/展开、Plotly hover/zoom、表格筛选。
+- 提供轻量交互能力：搜索、Plotly hover/zoom、表格筛选和 CSV 链接。
 - 保持单一 Snakemake 主流水线；不要引入额外 `run.sh report` 或复杂手工选择入口作为主线。
 - 暂不开发 Streamlit/Dash Web App；如果静态报告已经不足，再作为后续阶段单独规划。
 
@@ -874,7 +872,6 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 修改：
   - `workflow/Snakefile`
   - `workflow/scripts/generate_report_cli.py`
-  - `workflow/lib/reporting.py`
 - 建议新增：
   - `workflow/lib/report_data.py`
   - `workflow/lib/report_views.py`
@@ -908,9 +905,8 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 1. 拆分 report 代码职责。
    - `report_data.py` 负责读取 analysis CSV/JSON。
    - `report_data.py` 负责做轻量展示前整理，例如列选择、数量统计、表格截断。
-   - `report_views.py` 负责生成 Plotly figure 和 HTML section。
-   - `reporting.py` 负责把各 section 组装成完整 HTML。
-   - `generate_report_cli.py` 只负责解析参数、调用 report 生成函数和写文件。
+   - `report_views.py` 负责生成 Plotly figure、HTML section 和完整 HTML 字符串。
+   - `generate_report_cli.py` 负责解析参数、加载数据并写出 HTML 文件。
 
 2. 报告首页 / 总览视图。
    - 数据来源：`analysis_summary.json`。
@@ -996,7 +992,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 2. 第二轮：重构 HTML 组装。
    - 新增 `report_views.py`。
-   - 将 Plotly figure 构造从 `reporting.py` 拆出。
+   - 将 Plotly figure 构造和 HTML section 组装集中到 `report_views.py`。
    - 建立统一 HTML layout、CSS 和 section 结构。
 
 3. 第三轮：增加核心图表。
@@ -1008,12 +1004,11 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 4. 第四轮：增加静态交互。
    - 表格搜索。
    - suite / metric / classification 过滤。
-   - section 折叠/展开。
    - CSV 文件路径链接。
 
 5. 第五轮：清理旧单 experiment report 路径。
-   - 决定是否保留旧 `generate_pure_plotly_report()` 作为调试辅助。
-   - 如果不再需要，将默认 `FINAL_REPORTS` 切换为全局 `analysis_report.html`。
+   - 移除旧 `generate_pure_plotly_report()` 单实验报告实现，避免报告系统出现两条主线。
+   - 将默认 report 目标切换为全局 `analysis_report.html`。
    - 更新 metadata 中 report 路径说明。
 
 ### 暂不进入本阶段的内容
