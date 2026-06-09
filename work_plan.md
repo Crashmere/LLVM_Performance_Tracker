@@ -813,6 +813,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 标准差
    - 变异系数
    - 置信区间
+   - 只在相同 `suite_name / suite_version / test_name / metric` 内比较不同 `compiler_version`
    - regression / improvement 分类
    - stable / candidate / reliable 状态
 
@@ -920,6 +921,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 3. 回归与改善排行榜。
    - 数据来源：`top_regressions.csv`、`top_improvements.csv`。
    - 展示 top N regression / improvement 表格。
+   - 优先展示 baseline/candidate LLVM compiler version，suite version 作为固定上下文展示。
    - 用颜色区分 regression、improvement、stable。
    - 明确展示 `normalized_change_percent`，并说明正数为变差、负数为变好。
    - 展示 `classification` 和 `evidence`，避免把 candidate 误读为强统计结论。
@@ -927,6 +929,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 4. Metric comparison 视图。
    - 数据来源：`metric_comparisons.csv`。
+   - comparison 的主轴是 LLVM/compiler version；suite version 必须保持相同，不作为性能变化对比轴。
    - 增加按 suite、metric、classification 的过滤。
    - 增加 test/kernel 名搜索。
    - 增加按变化幅度排序的表格。

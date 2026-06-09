@@ -14,21 +14,23 @@ from workflow.lib.report_data import AnalysisReportData, suite_metric_summary, t
 TOP_CHANGE_COLUMNS = [
     "suite_name",
     "metric",
-    "baseline_suite_version",
-    "candidate_suite_version",
+    "baseline_compiler_version",
+    "candidate_compiler_version",
     "baseline_mean",
     "candidate_mean",
     "normalized_change_percent",
     "classification",
     "evidence",
+    "baseline_suite_version",
+    "candidate_suite_version",
     "test_name",
 ]
 
 COMPARISON_COLUMNS = [
     "suite_name",
     "metric",
-    "baseline_suite_version",
-    "candidate_suite_version",
+    "baseline_compiler_version",
+    "candidate_compiler_version",
     "baseline_observations",
     "candidate_observations",
     "baseline_mean",
@@ -36,6 +38,8 @@ COMPARISON_COLUMNS = [
     "normalized_change_percent",
     "classification",
     "evidence",
+    "baseline_suite_version",
+    "candidate_suite_version",
     "test_name",
 ]
 
@@ -150,7 +154,7 @@ def _summary_section(data: AnalysisReportData) -> str:
         ("Input files", inputs.get("count", 0), "Parsed CSV files included"),
         ("Analysis records", records.get("analysis_records", len(data.analysis_records)), "Metric observations"),
         ("Sample groups", records.get("sample_statistics", len(data.sample_statistics)), "Grouped statistics"),
-        ("Comparisons", records.get("metric_comparisons", len(data.metric_comparisons)), "Baseline/candidate pairs"),
+        ("LLVM comparisons", records.get("metric_comparisons", len(data.metric_comparisons)), "Compiler version pairs"),
         ("Suites", len(coverage.get("suites", [])), ", ".join(map(str, coverage.get("suites", []))) or "none"),
         ("Samples", len(coverage.get("samples", [])), ", ".join(map(str, coverage.get("samples", []))) or "none"),
     ]
@@ -163,6 +167,7 @@ def _summary_section(data: AnalysisReportData) -> str:
     )
 
     versions = ", ".join(map(str, coverage.get("compiler_versions", []))) or "none"
+    suite_versions = ", ".join(map(str, coverage.get("suite_versions", []))) or "none"
     labels = ", ".join(map(str, coverage.get("labels", [])[:8])) or "none"
     if len(coverage.get("labels", [])) > 8:
         labels += ", ..."
@@ -176,7 +181,9 @@ def _summary_section(data: AnalysisReportData) -> str:
   <div class="cards">{card_html}</div>
   <div class="note">
     <p>{settings_html}</p>
+    <p>Comparison scope: LLVM/compiler versions are compared only within the same suite, suite version, test, and metric.</p>
     <p>Compiler versions: {escape(versions)}</p>
+    <p>Suite versions: {escape(suite_versions)}</p>
     <p>Labels: {escape(labels)}</p>
   </div>
   <div class="pill-row">{counts_html}</div>
@@ -191,8 +198,8 @@ def _top_changes_section(data: AnalysisReportData, csv_links: dict[str, str]) ->
 <section class="panel" id="top-changes">
   <div class="section-heading">
     <p class="eyebrow">Priority list</p>
-    <h2>Top Regressions And Improvements</h2>
-    <p class="muted">Positive normalized change means worse performance; negative means improvement.</p>
+    <h2>Top LLVM Version Regressions And Improvements</h2>
+    <p class="muted">Positive normalized change means the candidate LLVM version is worse; negative means improvement. Suite versions are fixed within each comparison.</p>
   </div>
   <div class="split">
     <div>
@@ -220,9 +227,9 @@ def _comparison_section(data: AnalysisReportData, csv_links: dict[str, str]) -> 
     return f"""
 <section class="panel" id="comparisons">
   <div class="section-heading">
-    <p class="eyebrow">Full comparison table</p>
-    <h2>Metric Comparisons</h2>
-    <p class="muted">Use filters to narrow the comparison table. The table is capped at 500 highest-change rows in HTML; the full CSV remains available.</p>
+    <p class="eyebrow">Full LLVM comparison table</p>
+    <h2>Metric Comparisons Across LLVM Versions</h2>
+    <p class="muted">Use filters to narrow the comparison table. Comparisons keep suite version fixed and vary LLVM/compiler version. The table is capped at 500 highest-change rows in HTML; the full CSV remains available.</p>
   </div>
   <p><a href="{escape(csv_links['metric_comparisons.csv'])}">Open full CSV</a></p>
   {_table(
@@ -313,6 +320,11 @@ def _build_figures(data: AnalysisReportData) -> list[tuple[str, str, go.Figure]]
             _top_change_figure(data),
         ),
         (
+            "LLVM Version Pair Change Matrix",
+            "Changed rows grouped by baseline/candidate LLVM version pair and metric.",
+            _compiler_pair_heatmap(data),
+        ),
+        (
             "Noisiest Sample Groups",
             "Coefficient of variation highlights tests with unstable measurements.",
             _sample_noise_figure(data),
@@ -355,8 +367,20 @@ def _top_change_figure(data: AnalysisReportData) -> go.Figure:
             y=combined["short_name"],
             orientation="h",
             marker_color=colors,
-            customdata=combined[["metric", "classification", "evidence"]],
-            hovertemplate="%{y}<br>%{x:.2f}%<br>%{customdata[0]}<br>%{customdata[1]} / %{customdata[2]}<extra></extra>",
+            customdata=combined[
+                [
+                    "metric",
+                    "baseline_compiler_version",
+                    "candidate_compiler_version",
+                    "classification",
+                    "evidence",
+                ]
+            ],
+            hovertemplate=(
+                "%{y}<br>%{x:.2f}%<br>%{customdata[0]}<br>"
+                "LLVM %{customdata[1]} -> %{customdata[2]}<br>"
+                "%{customdata[3]} / %{customdata[4]}<extra></extra>"
+            ),
         )
     )
     fig.update_layout(template="plotly_white", height=620, margin=dict(l=220, r=40, t=30, b=50))
@@ -382,6 +406,45 @@ def _sample_noise_figure(data: AnalysisReportData) -> go.Figure:
     )
     fig.update_layout(template="plotly_white", height=620, margin=dict(l=220, r=40, t=30, b=50))
     fig.update_xaxes(title_text="Coefficient of variation")
+    return fig
+
+
+def _compiler_pair_heatmap(data: AnalysisReportData) -> go.Figure:
+    comparisons = data.metric_comparisons.copy()
+    required = {
+        "baseline_compiler_version",
+        "candidate_compiler_version",
+        "metric",
+        "classification",
+    }
+    if comparisons.empty or not required.issubset(comparisons.columns):
+        return go.Figure()
+
+    changed = comparisons[comparisons["classification"].astype(str) != "stable"].copy()
+    if changed.empty:
+        changed = comparisons
+    changed["compiler_pair"] = (
+        changed["baseline_compiler_version"].astype(str)
+        + " -> "
+        + changed["candidate_compiler_version"].astype(str)
+    )
+    pivot = changed.pivot_table(
+        index="compiler_pair",
+        columns="metric",
+        values="classification",
+        aggfunc="count",
+        fill_value=0,
+    )
+    fig = go.Figure(
+        go.Heatmap(
+            z=pivot.values,
+            x=list(pivot.columns),
+            y=list(pivot.index),
+            colorscale="Blues",
+            hovertemplate="LLVM pair=%{y}<br>metric=%{x}<br>rows=%{z}<extra></extra>",
+        )
+    )
+    fig.update_layout(template="plotly_white", height=360, margin=dict(l=180, r=40, t=30, b=80))
     return fig
 
 

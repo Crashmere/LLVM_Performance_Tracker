@@ -1059,7 +1059,9 @@ auto/parsed/*/benchmark_records.csv
 
 #### `metric_comparisons.csv`
 
-这是变化对比表。它基于 `sample_statistics.csv`，对同一个 `suite_name / test_name / metric` 下的不同版本组合做两两比较。
+这是变化对比表。它基于 `sample_statistics.csv`，在同一个 `suite_name / suite_version / test_name / metric` 内，对不同 LLVM/compiler version 组合做两两比较。
+
+也就是说，当前系统的性能变化主轴是 LLVM/compiler version；suite version 是固定上下文，不作为变化对比轴。
 
 字段说明：
 
@@ -1069,9 +1071,9 @@ auto/parsed/*/benchmark_records.csv
 - `metric_display_name`：展示名。
 - `direction`：指标方向。
 - `baseline_compiler_version`：baseline 编译器版本。
-- `baseline_suite_version`：baseline suite 版本。
+- `baseline_suite_version`：baseline suite 版本。它用于约束比较上下文，正常应与 candidate suite version 相同。
 - `candidate_compiler_version`：candidate 编译器版本。
-- `candidate_suite_version`：candidate suite 版本。
+- `candidate_suite_version`：candidate suite 版本。它用于约束比较上下文，正常应与 baseline suite version 相同。
 - `baseline_observations`：baseline 侧观测数量。
 - `candidate_observations`：candidate 侧观测数量。
 - `baseline_mean`：baseline 平均值。

@@ -294,10 +294,12 @@ def build_metric_comparisons(
         return pd.DataFrame(columns=COMPARISON_COLUMNS)
 
     rows: list[dict[str, Any]] = []
-    group_keys = ["suite_name", "test_name", "metric"]
+    # The project compares compiler/LLVM versions. Keep the benchmark suite version
+    # fixed so suite upgrades are not mistaken for compiler performance changes.
+    group_keys = ["suite_name", "suite_version", "test_name", "metric"]
 
     for _, group in sample_statistics.groupby(group_keys, dropna=False):
-        variants = group.sort_values(["compiler_version", "suite_version"]).reset_index(drop=True)
+        variants = group.sort_values(["compiler_version"]).reset_index(drop=True)
         if len(variants) < 2:
             continue
 
@@ -386,6 +388,8 @@ def build_analysis_summary(
         "settings": {
             "change_threshold_percent": threshold_percent,
             "min_samples": min_samples,
+            "comparison_axis": "compiler_version",
+            "comparison_group": ["suite_name", "suite_version", "test_name", "metric"],
         },
         "inputs": {
             "count": len(_unique_paths(input_files)),
@@ -404,6 +408,11 @@ def build_analysis_summary(
             else [],
             "compiler_versions": sorted(
                 analysis_records["compiler_version"].dropna().astype(str).unique().tolist()
+            )
+            if not analysis_records.empty
+            else [],
+            "suite_versions": sorted(
+                analysis_records["suite_version"].dropna().astype(str).unique().tolist()
             )
             if not analysis_records.empty
             else [],
