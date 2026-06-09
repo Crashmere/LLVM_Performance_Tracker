@@ -199,7 +199,7 @@ def _top_changes_section(data: AnalysisReportData, csv_links: dict[str, str]) ->
   <div class="section-heading">
     <p class="eyebrow">Priority list</p>
     <h2>Top LLVM Version Regressions And Improvements</h2>
-    <p class="muted">Positive normalized change means the candidate LLVM version is worse; negative means improvement. Suite versions are fixed within each comparison.</p>
+    <p class="muted">Positive normalized change means the candidate LLVM version is better; negative means regression. Suite versions are fixed within each comparison.</p>
   </div>
   <div class="split">
     <div>
@@ -316,7 +316,7 @@ def _build_figures(data: AnalysisReportData) -> list[tuple[str, str, go.Figure]]
         ),
         (
             "Largest Normalized Changes",
-            "Regression bars point right; improvement bars point left.",
+            "Improvement bars point right; regression bars point left.",
             _top_change_figure(data),
         ),
         (
@@ -358,7 +358,7 @@ def _top_change_figure(data: AnalysisReportData) -> go.Figure:
     combined["normalized_change_percent"] = pd.to_numeric(combined["normalized_change_percent"], errors="coerce")
     combined["short_name"] = combined["test_name"].astype(str).map(_shorten)
     colors = [
-        "rgba(26, 127, 80, 0.85)" if value < 0 else "rgba(184, 69, 56, 0.85)"
+        "rgba(26, 127, 80, 0.85)" if value > 0 else "rgba(184, 69, 56, 0.85)"
         for value in combined["normalized_change_percent"].fillna(0)
     ]
     fig = go.Figure(
@@ -384,7 +384,7 @@ def _top_change_figure(data: AnalysisReportData) -> go.Figure:
         )
     )
     fig.update_layout(template="plotly_white", height=620, margin=dict(l=220, r=40, t=30, b=50))
-    fig.update_xaxes(title_text="Normalized change (%)")
+    fig.update_xaxes(title_text="Normalized change (%; positive is improvement)")
     return fig
 
 
@@ -550,10 +550,12 @@ def _table_controls(
 def _format_cell(column: str, value: Any) -> str:
     if pd.isna(value):
         return ""
-    if column in {"normalized_change_percent", "raw_change_percent"}:
+    if column == "normalized_change_percent":
         text = f"{float(value):+.2f}%"
-        klass = "regression" if float(value) > 0 else "improvement" if float(value) < 0 else "stable"
+        klass = "improvement" if float(value) > 0 else "regression" if float(value) < 0 else "stable"
         return f'<span class="change {klass}">{escape(text)}</span>'
+    if column == "raw_change_percent":
+        return escape(f"{float(value):+.2f}%")
     if column in {"baseline_mean", "candidate_mean", "mean", "std", "cv", "ci95_low", "ci95_high", "value"}:
         try:
             return escape(f"{float(value):.6g}")

@@ -1079,7 +1079,7 @@ auto/parsed/*/benchmark_records.csv
 - `baseline_mean`：baseline 平均值。
 - `candidate_mean`：candidate 平均值。
 - `raw_change_percent`：原始变化百分比，计算为 `(candidate - baseline) / abs(baseline) * 100`。
-- `normalized_change_percent`：按指标方向归一后的变化。正数表示变差，负数表示变好。
+- `normalized_change_percent`：按指标方向归一后的变化。正数表示变好，负数表示变差。
 - `classification`：变化分类。
 - `evidence`：分类依据。
 
@@ -1106,14 +1106,14 @@ auto/parsed/*/benchmark_records.csv
 生成逻辑：
 
 - 保留 `classification` 以 `regression` 结尾的行。
-- 按 `normalized_change_percent` 从大到小排序。
+- 按 `normalized_change_percent` 从小到大排序。
 - 默认保留前 50 行。
 
 解释方式：
 
 - 对 `lower` 指标，例如 `exec_time`，数值上升通常是 regression。
 - 对 `higher` 指标，例如 `flops_gflops`，数值下降通常是 regression。
-- `normalized_change_percent` 越大，表示退化越明显。
+- `normalized_change_percent` 越小，表示退化越明显。
 
 #### `top_improvements.csv`
 
@@ -1122,14 +1122,14 @@ auto/parsed/*/benchmark_records.csv
 生成逻辑：
 
 - 保留 `classification` 以 `improvement` 结尾的行。
-- 按 `normalized_change_percent` 从小到大排序。
+- 按 `normalized_change_percent` 从大到小排序。
 - 默认保留前 50 行。
 
 解释方式：
 
 - 对 `lower` 指标，例如 `exec_time`，数值下降通常是 improvement。
 - 对 `higher` 指标，例如 `flops_gflops`，数值上升通常是 improvement。
-- `normalized_change_percent` 越小，表示改善越明显。
+- `normalized_change_percent` 越大，表示改善越明显。
 
 #### `analysis_summary.json`
 

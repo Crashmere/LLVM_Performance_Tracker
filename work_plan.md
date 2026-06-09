@@ -923,7 +923,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
    - 展示 top N regression / improvement 表格。
    - 优先展示 baseline/candidate LLVM compiler version，suite version 作为固定上下文展示。
    - 用颜色区分 regression、improvement、stable。
-   - 明确展示 `normalized_change_percent`，并说明正数为变差、负数为变好。
+   - 明确展示 `normalized_change_percent`，并说明正数为变好、负数为变差。
    - 展示 `classification` 和 `evidence`，避免把 candidate 误读为强统计结论。
    - 目的：作为报告最重要的入口，帮助用户快速定位值得关注的变化。
 

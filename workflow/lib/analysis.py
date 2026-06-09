@@ -274,7 +274,7 @@ def _classify_change(
     if abs(normalized_change_percent) < threshold_percent:
         return "stable", "below_threshold"
 
-    direction = "regression" if normalized_change_percent > 0 else "improvement"
+    direction = "improvement" if normalized_change_percent > 0 else "regression"
     if baseline_n < min_samples or candidate_n < min_samples:
         return f"candidate_{direction}", "insufficient_samples"
     if ci_overlap is False:
@@ -313,7 +313,7 @@ def build_metric_comparisons(
 
             raw_change_percent = ((candidate_mean - baseline_mean) / abs(baseline_mean)) * 100.0
             normalized_change_percent = (
-                raw_change_percent if baseline["direction"] == "lower" else -raw_change_percent
+                -raw_change_percent if baseline["direction"] == "lower" else raw_change_percent
             )
             overlap = _ci_overlap(baseline, candidate)
             classification, evidence = _classify_change(
@@ -357,10 +357,10 @@ def split_top_changes(metric_comparisons: pd.DataFrame, *, limit: int = 50) -> t
 
     regressions = metric_comparisons[
         metric_comparisons["classification"].str.endswith("regression", na=False)
-    ].sort_values("normalized_change_percent", ascending=False)
+    ].sort_values("normalized_change_percent", ascending=True)
     improvements = metric_comparisons[
         metric_comparisons["classification"].str.endswith("improvement", na=False)
-    ].sort_values("normalized_change_percent", ascending=True)
+    ].sort_values("normalized_change_percent", ascending=False)
     return regressions.head(limit).copy(), improvements.head(limit).copy()
 
 
@@ -390,6 +390,7 @@ def build_analysis_summary(
             "min_samples": min_samples,
             "comparison_axis": "compiler_version",
             "comparison_group": ["suite_name", "suite_version", "test_name", "metric"],
+            "normalized_change_direction": "positive_is_improvement",
         },
         "inputs": {
             "count": len(_unique_paths(input_files)),
