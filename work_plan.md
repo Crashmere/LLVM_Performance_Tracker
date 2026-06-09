@@ -1036,6 +1036,87 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ---
 
+## 阶段 7 后续优化：报告模板化重构
+
+### 背景
+
+当前 `workflow/lib/report_views.py` 已经能生成可用的全局 HTML report，但它同时混合了 Python 数据组织、Plotly 图表构造、HTML 字符串、CSS 和少量 JavaScript。
+
+这种写法适合快速验证报告内容，但后续继续增加 section、样式和交互时会变得难维护。
+
+### 目标
+
+在不改变 Snakemake 主线、不引入额外运行入口的前提下，将报告生成逻辑拆成更清晰的模板化结构。
+
+优先采用轻量方案：Jinja2 模板 + 静态 CSS/JS。
+
+暂不优先引入 React / Vue / Svelte 等前端构建链；除非静态模板已经无法支撑后续交互需求。
+
+### 建议目录结构
+
+- `workflow/lib/report_data.py`
+  - 继续负责读取 `auto/analysis/` 中的 CSV/JSON。
+  - 保留轻量数据整理 helper。
+
+- `workflow/lib/report_figures.py`
+  - 从 `report_views.py` 中拆出 Plotly figure 构造函数。
+  - 只负责生成 figure 或 figure HTML。
+
+- `workflow/lib/report_tables.py`
+  - 负责表格列选择、展示行截断、筛选选项准备和单元格格式化。
+  - 避免在模板中写过多 Python 判断逻辑。
+
+- `workflow/lib/report_views.py`
+  - 收敛为薄 orchestrator。
+  - 负责组织 report context，调用 Jinja2 render，并返回完整 HTML。
+
+- `workflow/templates/analysis_report.html.j2`
+  - 主 HTML 模板。
+  - 负责整体页面结构和 section 顺序。
+
+- `workflow/templates/partials/table.html.j2`
+  - 可复用表格模板。
+  - 支持搜索框、过滤器、CSV 链接和空表提示。
+
+- `workflow/static/report.css`
+  - 报告样式。
+  - 后续可单独维护视觉主题。
+
+- `workflow/static/report.js`
+  - 表格搜索与筛选逻辑。
+  - 保持原生 JavaScript，不引入大型框架。
+
+### 设计原则
+
+- HTML/CSS/JS 从 Python 字符串中移出，提升可读性。
+- Python 层只准备数据、图表和模板 context。
+- 最终仍输出单个可离线打开的 HTML 文件。
+- Plotly JS 仍只内嵌一次，避免报告体积不必要膨胀。
+- 不改变 `generate_report_cli.py` 的用户接口。
+- 不新增 `./run.sh report`，report 仍由 Snakemake 主流水线生成。
+- 模板化重构不改变 analysis CSV/JSON schema，除非有明确的数据展示需求。
+
+### 建议实施顺序
+
+1. 引入 Jinja2 依赖并创建最小 `analysis_report.html.j2`。
+2. 将 `_css()` 内容迁移到 `workflow/static/report.css`，生成 HTML 时内嵌到 `<style>`。
+3. 将 `_javascript()` 内容迁移到 `workflow/static/report.js`，生成 HTML 时内嵌到 `<script>`。
+4. 将 `_figure_section()`、页面 section HTML 迁移到 Jinja2 模板。
+5. 将 Plotly 图表函数拆到 `report_figures.py`。
+6. 将表格构造和 cell formatting 拆到 `report_tables.py` 或模板 partial。
+7. 保持输出文件不变：`auto/reports/analysis_report.html`。
+8. 使用现有 `auto/analysis/` 数据回归验证 HTML 内容、图表顺序和表格筛选。
+
+### 暂不进入本优化的内容
+
+- 不引入前端构建系统。
+- 不做 Streamlit / Dash。
+- 不新增服务端或动态 Web 应用。
+- 不改变 analysis 数据生成逻辑。
+- 不改变 Snakemake DAG 主线。
+
+---
+
 ## 阶段 8：平台抽象与 HPC 可移植性支持
 
 ### 目标
