@@ -76,21 +76,25 @@ def render_analysis_report(data: AnalysisReportData, output_path: Path | str) ->
     csv_links = _csv_links(data.analysis_dir, output.parent)
     figures = _build_figures(data)
 
-    figure_sections: list[str] = []
+    figure_sections: dict[str, str] = {}
     include_plotly = True
-    for title, description, figure in figures:
-        figure_sections.append(_figure_section(title, description, figure, include_plotly))
+    for key, title, description, figure in figures:
+        figure_sections[key] = _figure_section(title, description, figure, include_plotly)
         include_plotly = False
 
     body = "\n".join(
         [
             _hero_section(data),
             _summary_section(data),
-            _top_changes_section(data, csv_links),
-            "\n".join(figure_sections),
-            _comparison_section(data, csv_links),
-            _sample_section(data, csv_links),
+            figure_sections["classification_counts"],
+            figure_sections["compiler_pair_matrix"],
+            figure_sections["suite_metric_matrix"],
             _suite_section(data),
+            figure_sections["largest_changes"],
+            _top_changes_section(data, csv_links),
+            _comparison_section(data, csv_links),
+            figure_sections["sample_noise"],
+            _sample_section(data, csv_links),
             _detail_section(data, csv_links),
         ]
     )
@@ -307,32 +311,37 @@ def _detail_section(data: AnalysisReportData, csv_links: dict[str, str]) -> str:
 """
 
 
-def _build_figures(data: AnalysisReportData) -> list[tuple[str, str, go.Figure]]:
+def _build_figures(data: AnalysisReportData) -> list[tuple[str, str, str, go.Figure]]:
     return [
         (
-            "Classification Counts",
+            "classification_counts",
+            "Outcome Classification Counts",
             "How many comparison rows are stable, candidate changes, or reliable changes.",
             _classification_counts_figure(data),
         ),
         (
+            "compiler_pair_matrix",
+            "Change Distribution By LLVM Version Pair",
+            "Changed rows grouped by baseline/candidate LLVM version pair and metric.",
+            _compiler_pair_heatmap(data),
+        ),
+        (
+            "suite_metric_matrix",
+            "Change Distribution By Suite And Metric",
+            "Counts of changed rows by suite and metric.",
+            _suite_metric_heatmap(data),
+        ),
+        (
+            "largest_changes",
             "Largest Normalized Changes",
             "Improvement bars point right; regression bars point left.",
             _top_change_figure(data),
         ),
         (
-            "LLVM Version Pair Change Matrix",
-            "Changed rows grouped by baseline/candidate LLVM version pair and metric.",
-            _compiler_pair_heatmap(data),
-        ),
-        (
+            "sample_noise",
             "Noisiest Sample Groups",
             "Coefficient of variation highlights tests with unstable measurements.",
             _sample_noise_figure(data),
-        ),
-        (
-            "Suite And Metric Change Matrix",
-            "Counts of changed rows by suite and metric.",
-            _suite_metric_heatmap(data),
         ),
     ]
 
