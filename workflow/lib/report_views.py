@@ -393,20 +393,47 @@ def _sample_noise_figure(data: AnalysisReportData) -> go.Figure:
     if noisy.empty:
         return go.Figure()
 
-    noisy["short_name"] = noisy["test_name"].astype(str).map(_shorten)
+    noisy["display_name"] = noisy.apply(_sample_noise_label, axis=1)
     fig = go.Figure(
         go.Bar(
             x=noisy["cv"],
-            y=noisy["short_name"],
+            y=noisy["display_name"],
             orientation="h",
             marker_color="rgba(70, 111, 171, 0.85)",
-            customdata=noisy[["metric", "observations"]],
-            hovertemplate="%{y}<br>CV=%{x:.4f}<br>%{customdata[0]} observations=%{customdata[1]}<extra></extra>",
+            customdata=noisy[
+                [
+                    "suite_name",
+                    "suite_version",
+                    "compiler_version",
+                    "metric",
+                    "observations",
+                    "mean",
+                    "std",
+                    "test_name",
+                ]
+            ],
+            hovertemplate=(
+                "%{customdata[7]}<br>"
+                "LLVM=%{customdata[2]}<br>"
+                "suite=%{customdata[0]} %{customdata[1]}<br>"
+                "metric=%{customdata[3]}<br>"
+                "CV=%{x:.4f}<br>"
+                "mean=%{customdata[5]:.6g}, std=%{customdata[6]:.6g}<br>"
+                "observations=%{customdata[4]}<extra></extra>"
+            ),
         )
     )
-    fig.update_layout(template="plotly_white", height=620, margin=dict(l=220, r=40, t=30, b=50))
+    fig.update_layout(template="plotly_white", height=620, margin=dict(l=280, r=40, t=30, b=50))
     fig.update_xaxes(title_text="Coefficient of variation")
+    fig.update_yaxes(autorange="reversed")
     return fig
+
+
+def _sample_noise_label(row: pd.Series) -> str:
+    compiler = str(row.get("compiler_version", "unknown"))
+    metric = str(row.get("metric", "metric"))
+    test_name = _shorten(str(row.get("test_name", "unknown")), 72)
+    return f"{compiler} | {metric} | {test_name}"
 
 
 def _compiler_pair_heatmap(data: AnalysisReportData) -> go.Figure:
