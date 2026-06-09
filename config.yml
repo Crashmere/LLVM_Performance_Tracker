@@ -35,15 +35,15 @@ suite_defaults:
   raja:
     cxx_standard: "17"
 
-test_selection:
-  official:
-    filters:
-      - "TSVC"
-    lit_args: []
-  raja:
-    kernels:
-      - "Basic_DAXPY"
-    extra_args: []
+# test_selection:
+#   official:
+#     filters:
+#       - "TSVC"
+#     lit_args: []
+#   raja:
+#     kernels:
+#       - "Basic_DAXPY"
+#     extra_args: []
 
 # Example: exclude selected tests or kernels instead.
 
@@ -70,7 +70,7 @@ test_selection:
 
 llvm:
   tags:
-    - "llvmorg-21.1.0"
+    - "llvmorg-22.1.0"
 
 test_suite:
   official:
