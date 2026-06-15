@@ -39,7 +39,7 @@ sudo apt-get install -y \
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install pyyaml lit pandas plotly pyarrow snakemake
+pip install pyyaml lit pandas plotly pyarrow jinja2 snakemake
 ```
 
 ## 配置

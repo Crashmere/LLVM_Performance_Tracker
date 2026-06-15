@@ -865,7 +865,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 报告默认反映 `auto/` 中保留下来的全部可用结果。
 - 提供结果总览、回归/改善榜单、suite 视图和指标分布视图。
 - 提供轻量交互能力：搜索、Plotly hover/zoom、表格筛选和 CSV 链接。
-- 保持单一 Snakemake 主流水线；不要引入额外 `run.sh report` 或复杂手工选择入口作为主线。
+- 保持单一 Snakemake 主流水线；`./run.sh report` 只作为基于现有 `auto/analysis/` 数据快速重生成 HTML 的辅助入口，不作为主线流程替代。
 - 暂不开发 Streamlit/Dash Web App；如果静态报告已经不足，再作为后续阶段单独规划。
 
 ### 需要修改/新增的代码或文件
@@ -874,8 +874,14 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
   - `workflow/Snakefile`
   - `workflow/scripts/generate_report_cli.py`
 - 建议新增：
-  - `workflow/lib/report_data.py`
-  - `workflow/lib/report_views.py`
+  - `workflow/lib/report/data.py`
+  - `workflow/lib/report/figures.py`
+  - `workflow/lib/report/tables.py`
+  - `workflow/lib/report/views.py`
+  - `workflow/templates/analysis_report.html.j2`
+  - `workflow/templates/partials/table.html.j2`
+  - `workflow/static/report.css`
+  - `workflow/static/report.js`
 
 ### 输入与输出设计
 
@@ -904,9 +910,12 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 ### 具体修改内容
 
 1. 拆分 report 代码职责。
-   - `report_data.py` 负责读取 analysis CSV/JSON。
-   - `report_data.py` 负责做轻量展示前整理，例如列选择、数量统计、表格截断。
-   - `report_views.py` 负责生成 Plotly figure、HTML section 和完整 HTML 字符串。
+   - `workflow/lib/report/data.py` 负责读取 analysis CSV/JSON。
+   - `workflow/lib/report/figures.py` 负责生成 Plotly figure 和 figure HTML。
+   - `workflow/lib/report/tables.py` 负责列选择、筛选选项准备、表格行构造和单元格格式化。
+   - `workflow/lib/report/views.py` 负责组织模板 context，调用 Jinja2 模板并返回完整 HTML。
+   - `workflow/templates/` 负责 HTML 结构。
+   - `workflow/static/` 负责报告 CSS 和 JavaScript。
    - `generate_report_cli.py` 负责解析参数、加载数据并写出 HTML 文件。
 
 2. 报告首页 / 总览视图。
@@ -988,14 +997,15 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 ### 建议实施顺序
 
 1. 第一轮：接入 analysis 数据。
-   - 新增 `report_data.py`。
+   - 新增 `workflow/lib/report/data.py`。
    - 修改 `generate_report_cli.py` 读取 `--analysis-dir`。
    - 修改 `Snakefile`，让 report 依赖 `ANALYSIS_OUTPUTS`。
    - 生成最小 HTML：summary cards + top regression/improvement tables。
 
 2. 第二轮：重构 HTML 组装。
-   - 新增 `report_views.py`。
-   - 将 Plotly figure 构造和 HTML section 组装集中到 `report_views.py`。
+   - 新增 `workflow/lib/report/views.py`。
+   - 将 Plotly figure 构造拆入 `workflow/lib/report/figures.py`。
+   - 将表格构造和 cell formatting 拆入 `workflow/lib/report/tables.py`。
    - 建立统一 HTML layout、CSS 和 section 结构。
 
 3. 第三轮：增加核心图表。
@@ -1017,7 +1027,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 ### 暂不进入本阶段的内容
 
 - 不做 Streamlit / Dash 应用。
-- 不新增 `./run.sh report`。
+- 不让 `./run.sh report` 成为主工作流入口。
 - 不提供复杂命令行筛选历史结果。
 - 不在 report 阶段重新计算 statistics。
 - 不在 report 阶段修改 analysis 数据。
@@ -1036,11 +1046,13 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ---
 
-## 阶段 7 后续优化：报告模板化重构
+## 阶段 7：报告模板化重构
 
 ### 背景
 
-当前 `workflow/lib/report_views.py` 已经能生成可用的全局 HTML report，但它同时混合了 Python 数据组织、Plotly 图表构造、HTML 字符串、CSS 和少量 JavaScript。
+当前全局 HTML report 已经能消费 `auto/analysis/` 数据，但报告模块本身需要保持可继续扩展。
+
+早期 `workflow/lib/report_views.py` 同时混合了 Python 数据组织、Plotly 图表构造、HTML 字符串、CSS 和少量 JavaScript。
 
 这种写法适合快速验证报告内容，但后续继续增加 section、样式和交互时会变得难维护。
 
@@ -1054,19 +1066,19 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ### 建议目录结构
 
-- `workflow/lib/report_data.py`
+- `workflow/lib/report/data.py`
   - 继续负责读取 `auto/analysis/` 中的 CSV/JSON。
   - 保留轻量数据整理 helper。
 
-- `workflow/lib/report_figures.py`
-  - 从 `report_views.py` 中拆出 Plotly figure 构造函数。
+- `workflow/lib/report/figures.py`
+  - 从旧 views 逻辑中拆出 Plotly figure 构造函数。
   - 只负责生成 figure 或 figure HTML。
 
-- `workflow/lib/report_tables.py`
+- `workflow/lib/report/tables.py`
   - 负责表格列选择、展示行截断、筛选选项准备和单元格格式化。
   - 避免在模板中写过多 Python 判断逻辑。
 
-- `workflow/lib/report_views.py`
+- `workflow/lib/report/views.py`
   - 收敛为薄 orchestrator。
   - 负责组织 report context，调用 Jinja2 render，并返回完整 HTML。
 
@@ -1093,7 +1105,7 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 - 最终仍输出单个可离线打开的 HTML 文件。
 - Plotly JS 仍只内嵌一次，避免报告体积不必要膨胀。
 - 不改变 `generate_report_cli.py` 的用户接口。
-- 不新增 `./run.sh report`，report 仍由 Snakemake 主流水线生成。
+- `./run.sh report` 可以作为辅助调试入口，但 report 仍由 Snakemake 主流水线生成。
 - 模板化重构不改变 analysis CSV/JSON schema，除非有明确的数据展示需求。
 
 ### 建议实施顺序
@@ -1102,8 +1114,8 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 2. 将 `_css()` 内容迁移到 `workflow/static/report.css`，生成 HTML 时内嵌到 `<style>`。
 3. 将 `_javascript()` 内容迁移到 `workflow/static/report.js`，生成 HTML 时内嵌到 `<script>`。
 4. 将 `_figure_section()`、页面 section HTML 迁移到 Jinja2 模板。
-5. 将 Plotly 图表函数拆到 `report_figures.py`。
-6. 将表格构造和 cell formatting 拆到 `report_tables.py` 或模板 partial。
+5. 将 Plotly 图表函数拆到 `workflow/lib/report/figures.py`。
+6. 将表格构造和 cell formatting 拆到 `workflow/lib/report/tables.py` 或模板 partial。
 7. 保持输出文件不变：`auto/reports/analysis_report.html`。
 8. 使用现有 `auto/analysis/` 数据回归验证 HTML 内容、图表顺序和表格筛选。
 

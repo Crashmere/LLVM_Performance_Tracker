@@ -1,0 +1,156 @@
+{% macro figure_section(figure) -%}
+<section class="panel chart-panel">
+  <div class="section-heading">
+    <p class="eyebrow">Chart</p>
+    <h2>{{ figure.title }}</h2>
+    <p class="muted">{{ figure.description }}</p>
+  </div>
+  {{ figure.html | safe }}
+</section>
+{%- endmacro %}
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLVM Performance Analysis Report</title>
+  <style>{{ css | safe }}</style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Snakemake analysis report</p>
+      <h1>LLVM Performance Analysis</h1>
+      <p>
+        This report summarizes all retained parsed benchmark results under <code>auto/parsed</code>.
+        To exclude an old result from analysis, remove the unwanted output from <code>auto/</code> and rerun the workflow.
+      </p>
+      <p class="muted">Generated at {{ overview.generated_at }}</p>
+    </section>
+
+    <section class="panel" id="overview">
+      <div class="section-heading">
+        <p class="eyebrow">Overview</p>
+        <h2>Analysis Coverage</h2>
+      </div>
+      <div class="cards">
+        {% for card in overview.cards %}
+        <div class="card">
+          <span>{{ card.title }}</span>
+          <strong>{{ card.value }}</strong>
+          <em>{{ card.detail }}</em>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="note">
+        <p>
+          Threshold: <strong>{{ overview.change_threshold_percent }}%</strong>.
+          Minimum observations for reliable evidence: <strong>{{ overview.min_samples }}</strong>.
+        </p>
+        <p>Comparison scope: LLVM/compiler versions are compared only within the same suite, suite version, test, and metric.</p>
+        <p>Compiler versions: {{ overview.compiler_versions }}</p>
+        <p>Suite versions: {{ overview.suite_versions }}</p>
+        <p>Labels: {{ overview.labels }}</p>
+      </div>
+      <div class="pill-row">
+        {% for pill in overview.classification_pills %}
+        <span class="pill {{ pill.kind }}">{{ pill.label }}</span>
+        {% endfor %}
+      </div>
+    </section>
+
+    {% for figure in leading_figures %}
+    {{ figure_section(figure) }}
+    {% endfor %}
+
+    <section class="panel" id="suites">
+      <div class="section-heading">
+        <p class="eyebrow">Suite views</p>
+        <h2>Official And RAJA Summary</h2>
+      </div>
+      <div class="suite-grid">
+        {% if suite_cards %}
+        {% for suite in suite_cards %}
+        <article class="suite-card">
+          <h3>{{ suite.name }}</h3>
+          <p class="muted">Metrics: {{ suite.metrics }}</p>
+          <div class="mini-cards">
+            {% for card in suite.cards %}
+            <div class="card">
+              <span>{{ card.title }}</span>
+              <strong>{{ card.value }}</strong>
+              <em>{{ card.detail }}</em>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+        {% endfor %}
+        {% else %}
+        <p class="muted">No suite data available.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    {{ figure_section(largest_changes_figure) }}
+
+    <section class="panel" id="top-changes">
+      <div class="section-heading">
+        <p class="eyebrow">Priority list</p>
+        <h2>Top LLVM Version Regressions And Improvements</h2>
+        <p class="muted">Positive normalized change means the candidate LLVM version is better; negative means regression. Suite versions are fixed within each comparison.</p>
+      </div>
+      <div class="split">
+        <div>
+          <h3>Top Regressions</h3>
+          <p><a href="{{ csv_links['top_regressions.csv'] }}">Open CSV</a></p>
+          {% set table = top_regressions_table %}
+          {% include "partials/table.html.j2" %}
+        </div>
+        <div>
+          <h3>Top Improvements</h3>
+          <p><a href="{{ csv_links['top_improvements.csv'] }}">Open CSV</a></p>
+          {% set table = top_improvements_table %}
+          {% include "partials/table.html.j2" %}
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="comparisons">
+      <div class="section-heading">
+        <p class="eyebrow">Full LLVM comparison table</p>
+        <h2>Metric Comparisons Across LLVM Versions</h2>
+        <p class="muted">Use filters to narrow the comparison table. Comparisons keep suite version fixed and vary LLVM/compiler version. The table is capped at 500 highest-change rows in HTML; the full CSV remains available.</p>
+      </div>
+      <p><a href="{{ csv_links['metric_comparisons.csv'] }}">Open full CSV</a></p>
+      {% set table = comparison_table %}
+      {% include "partials/table.html.j2" %}
+    </section>
+
+    {{ figure_section(sample_noise_figure) }}
+
+    <section class="panel" id="samples">
+      <div class="section-heading">
+        <p class="eyebrow">Noise and confidence</p>
+        <h2>Sample Statistics</h2>
+        <p class="muted">High CV values identify noisy tests. Low observation counts explain many candidate rather than reliable classifications.</p>
+      </div>
+      <p><a href="{{ csv_links['sample_statistics.csv'] }}">Open full CSV</a></p>
+      {% set table = sample_table %}
+      {% include "partials/table.html.j2" %}
+    </section>
+
+    <section class="panel" id="details">
+      <div class="section-heading">
+        <p class="eyebrow">Provenance</p>
+        <h2>Analysis Record Preview</h2>
+        <p class="muted">Only the first 200 rows are embedded to keep the HTML manageable.</p>
+      </div>
+      <p><a href="{{ csv_links['analysis_records.csv'] }}">Open full CSV</a></p>
+      {% set table = detail_table %}
+      {% include "partials/table.html.j2" %}
+    </section>
+  </main>
+  <script>{{ javascript | safe }}</script>
+</body>
+</html>
