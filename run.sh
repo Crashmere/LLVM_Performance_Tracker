@@ -30,6 +30,7 @@ Usage:
   ./run.sh dry-run                 Print the planned DAG without executing.
   ./run.sh resume                  Continue after an interrupted run.
   ./run.sh strict [command|args...] Run without --keep-going.
+  ./run.sh report                  Regenerate the HTML report from current analysis data.
   ./run.sh inspect [args...]       Inspect existing outputs without changing state.
   ./run.sh disk [args...]          Show disk usage under the workflow base directory.
   ./run.sh -- <args...>            Pass extra arguments through to snakemake.
@@ -58,6 +59,17 @@ case "${1-}" in
   resume)
     shift
     EXTRA_ARGS+=("--rerun-incomplete")
+    ;;
+  report)
+    shift
+    if [[ ! -x "$PYTHON_BIN" ]]; then
+      echo "Missing python executable at $PYTHON_BIN" >&2
+      echo "Create the virtual environment and install dependencies first." >&2
+      exit 1
+    fi
+    exec "$PYTHON_BIN" "$ROOT_DIR/workflow/scripts/generate_report_cli.py" \
+      --analysis-dir "$ROOT_DIR/auto/analysis" \
+      --output-html "$ROOT_DIR/auto/reports/analysis_report.html" "$@"
     ;;
   inspect)
     shift
