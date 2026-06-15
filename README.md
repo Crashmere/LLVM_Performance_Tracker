@@ -39,7 +39,7 @@ sudo apt-get install -y \
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install pyyaml lit pandas plotly pyarrow snakemake
+pip install pyyaml lit pandas plotly pyarrow jinja2 snakemake
 ```
 
 ## 配置
@@ -1186,3 +1186,212 @@ Introduce the Snakemake `analyze` stage to build report-ready analysis tables fr
 - I kept the design Snakemake-first: users still run the normal pipeline, and analysis is generated as part of the DAG.
 - I deliberately kept HTML consumption of the analysis data out of this stage, leaving visualization and report integration for the next phase.
 - I updated metadata, recovery notes, and inspect output to match the simplified parse/analyze/report flow.
+
+### 阶段七：全局 HTML 分析报告
+
+这一阶段把阶段六生成的 `auto/analysis/` 数据真正接入 HTML 报告。报告不再围绕单个 experiment 的临时图表，而是默认读取当前保留下来的全部 parsed/analysis 结果，生成一个面向 LLVM 版本性能变化分析的全局静态页面：
+
+```text
+auto/analysis/*.csv + auto/analysis/analysis_summary.json
+  -> workflow/lib/report/
+  -> workflow/templates/
+  -> workflow/static/
+  -> auto/reports/analysis_report.html
+```
+
+阶段七仍然保持 Snakemake 主线：正常运行 workflow 时，`analyze` 生成分析数据，`generate_report` 再读取这些数据生成 HTML。为了开发和调试方便，也新增了 `./run.sh report`，可以在不重新运行 benchmark 的情况下，基于现有 `auto/analysis/` 快速重生成报告。
+
+#### 主要设计决策
+
+- 报告输入统一切换为阶段六的 `auto/analysis/` 产物。
+- 最终报告目标统一为 `auto/reports/analysis_report.html`。
+- 报告默认反映 `auto/parsed/` 中保留下来的全部可用结果。
+- 如果用户不希望某些历史结果进入报告，应删除对应历史产物后重新运行主 workflow。
+- HTML report 是静态单文件，Plotly、CSS 和 JavaScript 都内嵌，适合归档和离线查看。
+- 页面中的 comparison 主轴是 LLVM/compiler version；suite version 固定为上下文，不作为性能变化对比轴。
+- 复杂的筛选、服务端应用或独立 dashboard 暂不进入本阶段。
+
+#### Report 代码结构
+
+阶段七将原先混合在一个 Python 文件中的 report 逻辑拆成更清晰的模块：
+
+- `workflow/lib/report/data.py`
+  - 读取 `auto/analysis/` 下的 CSV/JSON。
+  - 封装成 `AnalysisReportData`。
+  - 提供少量展示前 helper，例如 top rows、top CV rows、suite/metric summary。
+
+- `workflow/lib/report/figures.py`
+  - 负责构造 Plotly 图表。
+  - 当前包括 classification counts、LLVM version pair heatmap、suite/metric heatmap、largest normalized changes、noisiest sample groups。
+  - 只第一张图内嵌 Plotly JS，后续图表复用同一份 Plotly runtime，避免 HTML 体积重复膨胀。
+
+- `workflow/lib/report/tables.py`
+  - 负责表格列选择、筛选器配置、单元格格式化和 badge/change 样式 class。
+  - `build_table()` 不排序，只按调用方传入的 DataFrame 顺序生成 `TableView`。
+  - `classification`、`normalized_change_percent` 和 `test_name` 有专门展示格式。
+
+- `workflow/lib/report/views.py`
+  - 作为 report 编排层。
+  - 构造 Jinja2 context，组织 overview、figures、suite cards、tables 和 CSV links。
+  - 不再直接拼接大量 HTML/CSS/JS 字符串。
+
+- `workflow/templates/analysis_report.html.j2`
+  - 主 HTML 模板。
+  - 定义页面 section 顺序和整体结构。
+
+- `workflow/templates/partials/table.html.j2`
+  - 通用表格模板。
+  - 支持搜索框、下拉筛选、空表提示和已格式化 cell 渲染。
+
+- `workflow/static/report.css`
+  - 报告页面样式。
+  - 控制卡片、表格、badge、Plotly 面板和响应式布局。
+
+- `workflow/static/report.js`
+  - 轻量原生 JavaScript。
+  - 当前负责表格搜索和下拉筛选。
+
+#### 页面内容
+
+生成的 `analysis_report.html` 当前包含以下主要区域：
+
+- `LLVM Performance Analysis`
+  - 报告标题、生成时间和分析范围说明。
+  - 提醒用户报告默认总结保留在 `auto/parsed/` 下的全部 parsed 结果。
+
+- `Analysis Coverage`
+  - 展示输入文件数量、analysis records 数量、sample groups 数量、LLVM comparisons 数量、suite 数量和 sample 数量。
+  - 展示变化阈值、可靠证据所需最小观测数、覆盖的 compiler versions、suite versions 和 labels。
+  - 展示 `classification_counts`，例如 stable、candidate regression、reliable improvement 等。
+
+- `Outcome Classification Counts`
+  - 柱状图。
+  - 展示 stable / regression / improvement 等分类数量。
+
+- `Change Distribution By LLVM Version Pair`
+  - 热力图。
+  - 按 `baseline_compiler_version -> candidate_compiler_version` 和 `metric` 统计变化行数量。
+  - 只基于 `metric_comparisons.csv`，不会把不同 suite version 之间的差异当成 compiler 性能变化。
+
+- `Change Distribution By Suite And Metric`
+  - 热力图。
+  - 按 suite 和 metric 汇总变化数量。
+  - 如果未来同一个 suite 下有多个 suite version，它们各自内部的 compiler comparison 会汇总到同一个 suite/metric 格子里，但不会跨 suite version 做 comparison。
+
+- `Official And RAJA Summary`
+  - 每个 suite 一个 summary card。
+  - `Comparisons` 是该 suite 在 `metric_comparisons.csv` 中的行数。
+  - `Sample groups` 是该 suite 在 `sample_statistics.csv` 中的行数。
+  - 如果每个 test/metric 正好有两个 compiler version，comparison 数量通常接近 sample groups 的一半；若存在缺失 metric、单边结果、超过两个 compiler version 或被跳过的无效数值，则比例不会严格相等。
+
+- `Largest Normalized Changes`
+  - 横向条形图。
+  - 展示 top regression 和 top improvement 中变化幅度最大的项目。
+  - `normalized_change_percent > 0` 表示 candidate 变好，`< 0` 表示 candidate 变差。
+
+- `Top LLVM Version Regressions And Improvements`
+  - 左右两张表。
+  - 分别展示 top regressions 和 top improvements。
+  - 提供对应 CSV 链接。
+
+- `Metric Comparisons Across LLVM Versions`
+  - 完整 comparison 预览表。
+  - HTML 中按 `abs(normalized_change_percent)` 从大到小展示前 500 行。
+  - 支持搜索，并支持按 suite、metric、classification 筛选。
+  - 完整数据仍通过 `metric_comparisons.csv` 链接查看。
+
+- `Noisiest Sample Groups`
+  - 横向条形图。
+  - 按 CV 从高到低展示最 noisy 的 sample groups。
+  - 用于解释哪些测试更容易产生 candidate 而不是 reliable 结论。
+
+- `Sample Statistics`
+  - 样本统计表。
+  - HTML 中按 CV 从高到低展示前 100 行。
+  - 展示 observations、mean、std、cv、ci95_low/high。
+
+- `Analysis Record Preview`
+  - provenance/debug 表。
+  - 展示 `analysis_records.csv` 前 200 行。
+  - 完整数据仍通过 CSV 链接查看。
+
+#### 表格排序与交互
+
+`tables.py` 本身不改变行顺序。每张表的排序由 `views.py` 在调用 `build_table()` 前决定：
+
+- `Top Regressions`：阶段六已按 `normalized_change_percent` 升序排序，最严重 regression 在前。
+- `Top Improvements`：阶段六已按 `normalized_change_percent` 降序排序，最大 improvement 在前。
+- `Metric Comparisons`：报告层按 `abs(normalized_change_percent)` 降序排序，展示变化幅度最大的前 500 行。
+- `Sample Statistics`：报告层按 `cv` 降序排序，展示最 noisy 的前 100 个 sample groups。
+- `Analysis Record Preview`：保持 `analysis_records.csv` 原始顺序，展示前 200 行。
+
+表格搜索和筛选由 `workflow/static/report.js` 实现：
+
+- 搜索框匹配整行文本。
+- 下拉筛选通过 `data-column` 指定表格列。
+- 多个筛选条件同时生效。
+- 不重新请求数据，只在浏览器端隐藏或显示已有行。
+
+#### 使用方式
+
+正常主线仍然是：
+
+```bash
+./run.sh
+```
+
+如果已经有可用的 `auto/analysis/` 数据，只想重新生成 HTML 报告，可以使用：
+
+```bash
+./run.sh report
+```
+
+报告输出路径：
+
+```text
+auto/reports/analysis_report.html
+```
+
+需要注意的是，一些 IDE preview 插件可能不会执行内嵌 JavaScript，因此可能看不到 Plotly chart。此时应使用真实浏览器打开，或通过简单 HTTP server 查看：
+
+```bash
+python3 -m http.server 8000
+```
+
+然后打开：
+
+```text
+http://localhost:8000/auto/reports/analysis_report.html
+```
+
+#### 当前限制与后续增强
+
+- 当前图表可以发现变化数量和极端变化，但还没有专门展示某个 LLVM version pair 在某个 metric 上整体趋势的图。
+- `compiler_pair_matrix` 展示的是变化行数量，不直接展示改善/回归方向和幅度分布。
+- failed / missing results 目前仍主要通过 Snakemake 日志、metadata 和 inspect 工具分析，报告中尚未做专门展示。
+- 当前 report 是静态 HTML，不提供服务端查询或动态加载大 CSV。
+- 如果 HTML 表格数据继续变大，后续可以考虑分页、客户端排序或更轻量的数据加载策略。
+
+#### 验证与结果
+
+- 已执行 `py_compile` 检查 `workflow/lib/report/*.py` 和 `workflow/scripts/generate_report_cli.py`。
+- 已执行 `bash -n run.sh` 检查快捷脚本语法。
+- 已执行 `git diff --check` 检查格式。
+- 已执行 `./run.sh report`，确认可以基于现有 `auto/analysis/` 生成 `auto/reports/analysis_report.html`。
+- 已检查生成的 HTML 中包含 Plotly 图表容器和 `Plotly.newPlot` 调用。
+- 已确认 report 代码从旧的大型 Python 字符串拼接结构，拆分为 report 包、Jinja2 模板和静态 CSS/JS。
+
+#### Commit Message
+
+Add global analysis HTML report.
+Render the stage-six analysis dataset as a self-contained static HTML report, add report data/figure/table modules, move page structure into Jinja2 templates, and provide a lightweight report regeneration command.
+
+#### Weekly Update
+
+- This week I connected the analysis dataset to a global HTML report under `auto/reports/analysis_report.html`.
+- I replaced the old single-experiment report path with a report that reads `auto/analysis` tables and summarizes all retained parsed results.
+- I added overview cards, Plotly charts, suite summaries, top regression/improvement tables, comparison tables, sample statistics, and provenance previews.
+- I refactored report generation into a clearer structure with `workflow/lib/report/`, Jinja2 templates, and static CSS/JS.
+- I kept the report self-contained so it can be archived and opened offline.
+- I added `./run.sh report` as a development shortcut for regenerating the report from existing analysis data without rerunning benchmarks.
+- I documented current limitations, especially that the version-pair matrix shows change counts rather than full direction/magnitude trends.

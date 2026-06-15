@@ -70,7 +70,7 @@ suite_defaults:
 
 llvm:
   tags:
-    - "llvmorg-22.1.0"
+    - "llvmorg-19.1.0"
 
 test_suite:
   official:
