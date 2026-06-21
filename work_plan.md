@@ -1129,6 +1129,264 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ---
 
+## 阶段 7 后续优化：可视化分析体验升级
+
+### 背景
+
+当前全局 HTML report 已经能读取 `auto/analysis/` 数据并生成可用图表和表格，但从用户分析路径看，仍然偏“把数据展示出来”，还没有充分帮助用户回答关键性能分析问题。
+
+导师反馈集中在以下几点：
+
+- `Change Distribution By LLVM Version Pair` 只能看出哪个 version pair / metric 的变化行数多，不能直接看出整体趋势是 improvement 还是 regression。
+- `Change Distribution By Suite And Metric` 相比 compiler pair 图不够直观，因为它缺少明确的 version pair 上下文。
+- compiler pair 图覆盖所有 suite，suite/metric 图覆盖所有 compiler version，二者无法联动，用户不能自然地从“哪个 LLVM 版本对变化明显”下钻到“哪个 suite 贡献了变化”。
+- `Largest Normalized Changes` 缺少 suite 信息，用户无法直接判断某个 test 来自 Official 还是 RAJA。
+- `Noisiest Sample Groups` 中 top items 的 CV 可能非常接近，普通条形图肉眼难以区分，hover 中的数值格式也可能因为截断而看起来完全一样。
+- 图和表都堆在同一个页面上时，报告容易显得臃肿，用户需要更清晰的页面层级、导航和从图到表的跳转关系。
+
+### 升级目标
+
+本轮优化目标不是增加大量图表，而是让报告更像一个面向用户的分析界面，帮助用户按以下路径理解结果：
+
+```text
+整体覆盖范围
+  -> 哪些 LLVM version pair 变化明显
+  -> 这些变化整体偏 improvement 还是 regression
+  -> 变化主要来自哪个 suite / metric
+  -> 哪些具体 test/kernel 贡献最大
+  -> 这些结论是否受 noisy sample 影响
+  -> 必要时跳到表格核对明细
+```
+
+### 设计原则
+
+- 优先改造现有图表，谨慎新增图表，避免认知负担过高。
+- 每张图必须回答一个清晰问题，而不是只展示一个统计维度。
+- version pair、suite、metric、classification、test/kernel 应形成连续下钻路径。
+- 图表 hover 必须提供足够上下文，例如 suite、suite version、compiler pair、metric、classification、evidence。
+- 表格仍然保留作为精确核对入口，但不应成为理解趋势的唯一方式。
+- 继续保持静态 HTML、离线可打开和 Snakemake-first，不引入服务端 dashboard。
+- 第一版联动采用静态 HTML 内的 hash links、tab/page navigation 和客户端筛选；不引入复杂前端状态管理。
+
+### 推荐的信息架构
+
+将当前单页长报告改成“单 HTML 内的分页式 section”：
+
+- `Overview`
+  - 覆盖范围、输入数量、classification counts。
+  - 保留 summary cards 和全局说明。
+
+- `Trends`
+  - 面向 LLVM version pair 的趋势视图。
+  - 展示每个 version pair / metric 的方向、幅度和变化数量。
+
+- `Suites`
+  - 面向 suite 的下钻视图。
+  - 解释某个 version pair 的变化主要来自 Official 还是 RAJA，以及来自哪些 metric。
+
+- `Top Changes`
+  - 具体 test/kernel 的 top regression 和 top improvement。
+  - 图和表都要展示 suite 信息。
+
+- `Noise`
+  - noisiest sample groups、observations、CI 信息。
+  - 用于解释 candidate/reliable 判断。
+
+- `Data`
+  - comparison table、sample statistics table、analysis record preview。
+  - 作为明细核对与 CSV 跳转入口。
+
+实现方式优先采用单文件 HTML 内的 tab / section navigation，而不是拆成多个 HTML 文件。
+
+这样可以保持归档简单，同时减少首屏认知负担。
+
+### 图表改造计划
+
+1. 改造 `Change Distribution By LLVM Version Pair`。
+   - 当前问题：只显示变化行数，不能看趋势方向。
+   - 建议改名为 `LLVM Version Pair Trend Matrix` 或 `LLVM Version Pair Metric Trend`。
+   - 对每个 `baseline_compiler_version -> candidate_compiler_version + metric` 计算：
+     - changed row count
+     - regression count
+     - improvement count
+     - stable count
+     - median normalized change
+     - mean normalized change
+     - reliable change count
+   - 可视化方案：
+     - heatmap 色彩表示 median normalized change，绿色为整体改善，红色为整体退化。
+     - cell text 或 hover 显示 changed rows、regression/improvement 数量和 reliable 数量。
+     - 如果需要同时表现数量和方向，可以用颜色表示方向/幅度，用 hover 展示数量；不要用颜色同时表达两个含义。
+   - 用户价值：
+     - 一眼看出某个 LLVM version pair 在某个 metric 上整体偏好还是偏坏。
+     - 不再需要先看 count 再手工查表判断方向。
+
+2. 重构 `Change Distribution By Suite And Metric`。
+   - 当前问题：它聚合了所有 compiler version，缺少 version pair 上下文，容易让人误解。
+   - 建议改名为 `Suite Contribution By LLVM Version Pair`。
+   - 数据维度应至少包含：
+     - compiler pair
+     - suite_name
+     - metric
+     - classification
+     - normalized_change_percent
+   - 可视化方案：
+     - 第一版可以做 facet / grouped heatmap：
+       - y 轴：compiler pair + suite
+       - x 轴：metric
+       - 颜色：median normalized change 或 changed row count。
+     - 或者保留 suite x metric 图，但增加 compiler pair 过滤控件 / tab。
+   - 用户价值：
+     - 用户从 version pair 图发现问题后，可以进一步看到是 Official 贡献更大，还是 RAJA 贡献更大。
+
+3. 增加轻量 `Version Pair -> Suite -> Metric` 下钻路径。
+   - 不一定需要复杂交互。
+   - 第一版可以通过静态锚点和表格预过滤提示实现：
+     - 图表 hover 中显示可在 comparison table 中搜索的 compiler pair / metric / suite。
+     - 在相关 section 增加 “Open comparison table” 链接。
+     - 表格支持 suite、metric、classification、baseline/candidate compiler version 筛选。
+   - 第二版再考虑点击图表 cell 后自动设置表格筛选。
+   - 用户价值：
+     - 把图和表从“并列展示”变成“图指出问题，表核对细节”。
+
+4. 优化 `Largest Normalized Changes`。
+   - 当前问题：图中和 hover 中缺少 suite 信息。
+   - 改造内容：
+     - y 轴 label 增加 suite prefix，或使用 `suite | metric | shortened test`。
+     - hover 增加：
+       - suite_name
+       - baseline_suite_version / candidate_suite_version
+       - baseline/candidate compiler version
+       - metric
+       - classification
+       - evidence
+       - normalized_change_percent
+     - 如 y 轴过长，可只在 hover 中完整展示 suite 和 test，y 轴保留短 label。
+   - 用户价值：
+     - 用户能直接看出 top change 来自 Official 还是 RAJA。
+
+5. 优化 `Noisiest Sample Groups`。
+   - 当前问题：CV 值可能非常接近，普通 bar chart 不容易看出差异。
+   - 改造方向：
+     - hover 中增加更高精度，例如 CV 显示 6 位有效数字或百分比显示 4 位小数。
+     - x 轴可使用局部缩放范围，而不是从 0 开始，让非常接近的 top values 更容易区分。
+     - 考虑改为 dot plot / lollipop chart，而不是普通横向 bar。
+     - 增加 rank、cv、observations、std、mean 的表格或 inline text，承认这些值可能很接近。
+     - 只在差异足够明显时强调排名；否则文案应说明“这些 top noisy groups 的 CV 非常接近”。
+   - 用户价值：
+     - 避免用户误以为图表显示错误。
+     - 让 noise section 更像诊断工具，而不是单纯排行榜。
+
+6. 强化 `Metric Comparisons` 表格作为下钻目标。
+   - 当前表格已有 suite、metric、classification 筛选。
+   - 建议补充：
+     - baseline compiler version 筛选。
+     - candidate compiler version 筛选。
+     - evidence 筛选。
+     - normalized change range 或至少保留按变化绝对值排序。
+   - 如果实现图表点击联动，优先联动到这张表。
+
+### 数据层需求
+
+优先不改变阶段六的 CSV schema，先在 report 层从 `metric_comparisons.csv` 派生展示数据。
+
+如果后续发现多个图表都需要同样的聚合结果，再考虑在 report data 层新增 helper，而不是改变 analysis 输出。
+
+可能新增的 report-only helper：
+
+- `compiler_pair_metric_summary(metric_comparisons)`
+  - 按 compiler pair + metric 聚合 count、median/mean normalized change、classification counts。
+
+- `compiler_pair_suite_metric_summary(metric_comparisons)`
+  - 按 compiler pair + suite + metric 聚合趋势与数量。
+
+- `top_change_rows_with_context(top_regressions, top_improvements)`
+  - 为 largest changes 图提供 suite-aware label 和 hover data。
+
+- `noise_plot_rows(sample_statistics)`
+  - 生成适合 dot/lollipop 展示的 top noisy rows，并保留高精度 hover 数值。
+
+这些 helper 可以放在 `workflow/lib/report/data.py` 或新增 `workflow/lib/report/summaries.py`。
+
+如果 helper 数量继续增多，建议新增 `summaries.py`，避免 `data.py` 同时承担读取和聚合展示逻辑。
+
+### 模板与交互计划
+
+1. 增加报告导航。
+   - 在模板顶部增加 tab / nav：
+     - Overview
+     - Trends
+     - Suites
+     - Top Changes
+     - Noise
+     - Data
+   - 第一版使用锚点跳转或 CSS/JS tab。
+   - 保持所有内容仍在同一个 HTML 文件中。
+
+2. 改造 section 顺序。
+   - 先展示趋势，再展示 suite 下钻，再展示 top changes。
+   - 表格集中放到 Data section，减少图表叙事被大表打断。
+
+3. 增加图表到表格的链接。
+   - 每个核心图表下面提供 “Inspect related rows in Metric Comparisons”。
+   - 初版可以是跳转链接。
+   - 后续再做点击图表 cell 自动筛选表格。
+
+4. 表格筛选增强。
+   - `table.html.j2` 和 `report.js` 支持更多 filter 字段。
+   - 保持当前轻量原生 JavaScript，不引入前端框架。
+
+5. 保持离线报告。
+   - Plotly 仍内嵌一次。
+   - CSS/JS 继续内嵌。
+   - 不依赖 CDN。
+
+### 建议实施顺序
+
+1. 第一轮：修正上下文缺失。
+   - `Largest Normalized Changes` hover 和 label 增加 suite 信息。
+   - `Noisiest Sample Groups` hover 增加高精度数值。
+   - comparison table 增加 baseline/candidate compiler version 和 evidence filters。
+
+2. 第二轮：新增趋势摘要。
+   - 增加 compiler pair + metric summary helper。
+   - 将原 `Change Distribution By LLVM Version Pair` 改为趋势矩阵。
+   - hover 同时展示数量、方向、median/mean normalized change、reliable count。
+
+3. 第三轮：增加 suite 下钻。
+   - 增加 compiler pair + suite + metric summary helper。
+   - 替换或重命名原 `Change Distribution By Suite And Metric`。
+   - 让该图明确说明它是按 compiler pair 下钻 suite/metric，而不是跨所有 compiler version 混合解释。
+
+4. 第四轮：页面结构分页化。
+   - 将单页长报告整理成 Overview / Trends / Suites / Top Changes / Noise / Data sections。
+   - 表格移动到 Data section，图表 section 增加跳转链接。
+
+5. 第五轮：评估是否需要图表点击联动。
+   - 如果静态链接和筛选足够清晰，不急于实现复杂点击联动。
+   - 如果用户仍然需要手动查找过多，再实现 Plotly click event 设置表格 filter。
+
+### 暂不优先进入本轮的内容
+
+- 不新增大量小图表。
+- 不做 Dash / Streamlit。
+- 不引入 React / Vue / Svelte。
+- 不把所有 CSV 数据完整加载成复杂客户端应用。
+- 不在 report 阶段重新定义统计方法。
+- 不改变 `analysis.py` 的 comparison 语义。
+
+### 验收标准
+
+- 用户能从 version pair 图直接判断某个 metric 的整体趋势方向。
+- 用户能从 version pair 进一步下钻到 suite / metric 贡献。
+- top changes 图中能直接或通过 hover 判断 test/kernel 所属 suite。
+- noise 图不会因为数值接近而误导用户，hover 能显示足够精度。
+- report 页面结构比当前更清晰，大表不会打断图表叙事。
+- comparison table 仍然可以作为所有图表结论的明细核对入口。
+- 所有改造仍使用现有 `auto/analysis/` 数据生成，不新增运行入口。
+
+---
+
 ## 阶段 8：平台抽象与 HPC 可移植性支持
 
 ### 目标
