@@ -111,10 +111,6 @@
           Use this view to find which LLVM version pair and metric changed most clearly.
           Click a cell or row to reveal suite-level contribution for that version pair.
         </p>
-        <p class="action-link">
-          <a href="#suite-drilldown">Open suite drilldown</a>
-          <a href="#comparisons">Inspect comparison rows</a>
-        </p>
       </div>
       {{ compiler_pair_figure.html | safe }}
       <div class="drilldown-panel" id="suite-drilldown">
@@ -126,23 +122,22 @@
           </p>
         </div>
         {% if suite_drilldown_figures %}
-        <div class="drilldown-buttons" aria-label="Select LLVM version pair for suite drilldown">
-          {% for figure in suite_drilldown_figures %}
-          <button type="button" data-suite-drilldown-button="{{ figure.compiler_pair }}">{{ figure.compiler_pair }}</button>
-          {% endfor %}
-        </div>
+        <label class="drilldown-select-label">LLVM version pair
+          <select data-suite-drilldown-select>
+            <option value="">Select a version pair...</option>
+            {% for figure in suite_drilldown_figures %}
+            <option value="{{ figure.compiler_pair }}">{{ figure.compiler_pair }}</option>
+            {% endfor %}
+          </select>
+        </label>
         <div class="drilldown-placeholder" data-suite-drilldown-placeholder>
-          Click any cell in the LLVM Version Pair Trend Matrix to reveal the corresponding suite contribution.
+          Click any cell in the LLVM Version Pair Trend Matrix or use the selector above to reveal the corresponding suite contribution.
         </div>
         {% for figure in suite_drilldown_figures %}
         <article class="suite-drilldown" data-suite-drilldown data-compiler-pair="{{ figure.compiler_pair }}" hidden>
           <div class="section-heading compact-heading">
             <h3>{{ figure.title }}</h3>
             <p class="muted">{{ figure.description }}</p>
-            <p class="action-link">
-              <a href="#top-changes">Open concrete top changes</a>
-              <a href="#comparisons">Inspect comparison rows</a>
-            </p>
           </div>
           {{ figure.html | safe }}
         </article>
@@ -161,7 +156,6 @@
           Positive normalized change means the candidate LLVM version is better; negative means regression.
           Suite versions are fixed within each comparison, and suite information is shown in the chart labels and hover.
         </p>
-        <p class="action-link"><a href="#comparisons">Inspect related comparison rows</a></p>
       </div>
       <div class="chart-panel embedded-chart">
         {{ largest_changes_figure.html | safe }}

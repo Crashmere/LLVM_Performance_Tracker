@@ -152,7 +152,6 @@ def _overview(data: AnalysisReportData) -> dict[str, Any]:
             _card("Sample groups", records.get("sample_statistics", len(data.sample_statistics)), "Grouped statistics"),
             _card("LLVM comparisons", records.get("metric_comparisons", len(data.metric_comparisons)), "Compiler version pairs"),
             _card("Suites", len(coverage.get("suites", [])), _join_values(coverage.get("suites", []))),
-            _card("Samples", len(coverage.get("samples", [])), _join_values(coverage.get("samples", []))),
         ],
     }
 
@@ -205,9 +204,9 @@ def _suite_cards(data: AnalysisReportData) -> list[dict[str, Any]]:
                 "name": suite,
                 "metrics": metrics,
                 "cards": [
-                    _card("Comparisons", len(comparisons), "comparison rows"),
                     _card("Regressions", len(regressions), "candidate or reliable"),
                     _card("Improvements", len(improvements), "candidate or reliable"),
+                    _card("Comparisons", len(comparisons), "comparison rows"),
                     _card("Sample groups", len(samples), "statistical groups"),
                 ],
             }

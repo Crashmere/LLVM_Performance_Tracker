@@ -30,21 +30,19 @@ document.addEventListener("input", (event) => {
 });
 
 function showSuiteDrilldown(compilerPair, options = {}) {
-  if (!compilerPair) return;
-
   const panels = Array.from(document.querySelectorAll("[data-suite-drilldown]"));
-  const buttons = Array.from(document.querySelectorAll("[data-suite-drilldown-button]"));
+  const selector = document.querySelector("[data-suite-drilldown-select]");
   const placeholder = document.querySelector("[data-suite-drilldown-placeholder]");
   let selectedPanel = null;
 
   for (const panel of panels) {
-    const isSelected = panel.dataset.compilerPair === compilerPair;
+    const isSelected = Boolean(compilerPair) && panel.dataset.compilerPair === compilerPair;
     panel.hidden = !isSelected;
     if (isSelected) selectedPanel = panel;
   }
 
-  for (const button of buttons) {
-    button.classList.toggle("is-active", button.dataset.suiteDrilldownButton === compilerPair);
+  if (selector) {
+    selector.value = selectedPanel ? compilerPair : "";
   }
 
   if (placeholder) placeholder.hidden = Boolean(selectedPanel);
@@ -74,10 +72,9 @@ function setupSuiteDrilldown() {
     });
   }
 
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-suite-drilldown-button]");
-    if (button) {
-      showSuiteDrilldown(button.dataset.suiteDrilldownButton, { scroll: true });
+  document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-suite-drilldown-select]")) {
+      showSuiteDrilldown(event.target.value, { scroll: true });
     }
   });
 }
