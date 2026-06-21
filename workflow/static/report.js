@@ -42,6 +42,8 @@ function setupNavScrollSpy() {
 
   let activeLink = null;
   let ticking = false;
+  let lockedSection = null;
+  let unlockTimer = null;
 
   function sectionActivationLine() {
     const navBottom = nav.getBoundingClientRect().bottom;
@@ -87,9 +89,24 @@ function setupNavScrollSpy() {
     moveIndicator(activeLink);
   }
 
+  function unlockAfterScrollSettles(delay = 180) {
+    if (!lockedSection) return;
+    window.clearTimeout(unlockTimer);
+    unlockTimer = window.setTimeout(() => {
+      lockedSection = null;
+      requestUpdate();
+    }, delay);
+  }
+
+  function lockToSection(section) {
+    lockedSection = section;
+    setActive(section);
+    unlockAfterScrollSettles(650);
+  }
+
   function update() {
     ticking = false;
-    setActive(currentSection());
+    setActive(lockedSection || currentSection());
   }
 
   function requestUpdate() {
@@ -98,8 +115,29 @@ function setupNavScrollSpy() {
     window.requestAnimationFrame(update);
   }
 
+  for (const link of links) {
+    link.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+      const hash = link.getAttribute("href");
+      const target = document.querySelector(hash);
+      if (!target) return;
+
+      event.preventDefault();
+      lockToSection(target);
+      if (window.location.hash !== hash) {
+        window.history.pushState(null, "", hash);
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   nav.addEventListener("scroll", requestUpdate, { passive: true });
-  window.addEventListener("scroll", requestUpdate, { passive: true });
+  window.addEventListener("scroll", () => {
+    unlockAfterScrollSettles();
+    requestUpdate();
+  }, { passive: true });
   window.addEventListener("resize", requestUpdate);
   window.addEventListener("load", requestUpdate);
   requestUpdate();
