@@ -9,7 +9,7 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from workflow.lib.report.data import AnalysisReportData, top_cv_rows, top_rows
-from workflow.lib.report.figures import build_figures, render_figure_html
+from workflow.lib.report.figures import build_figures, build_suite_drilldown_figures, render_figure_html
 from workflow.lib.report.tables import (
     COMPARISON_COLUMNS,
     DETAIL_COLUMNS,
@@ -31,6 +31,7 @@ class FigureView:
     title: str
     description: str
     html: str
+    compiler_pair: str = ""
 
 
 def render_analysis_report(data: AnalysisReportData, output_path: Path | str) -> str:
@@ -49,7 +50,6 @@ def _build_context(data: AnalysisReportData, output: Path) -> dict[str, Any]:
         "nav_items": [
             {"href": "#overview", "label": "Overview"},
             {"href": "#trends", "label": "Trends"},
-            {"href": "#suites", "label": "Suites"},
             {"href": "#top-changes", "label": "Top Changes"},
             {"href": "#noise", "label": "Noise"},
             {"href": "#data", "label": "Data"},
@@ -57,7 +57,7 @@ def _build_context(data: AnalysisReportData, output: Path) -> dict[str, Any]:
         "overview": _overview(data),
         "classification_figure": figure_views["classification_counts"],
         "compiler_pair_figure": figure_views["compiler_pair_matrix"],
-        "suite_contribution_figure": figure_views["suite_metric_matrix"],
+        "suite_drilldown_figures": _suite_drilldown_views(data),
         "largest_changes_figure": figure_views["largest_changes"],
         "sample_noise_figure": figure_views["sample_noise"],
         "suite_cards": _suite_cards(data),
@@ -165,9 +165,25 @@ def _figure_views(data: AnalysisReportData) -> dict[str, FigureView]:
             key=spec.key,
             title=spec.title,
             description=spec.description,
-            html=render_figure_html(spec.figure, include_plotly=include_plotly),
+            html=render_figure_html(spec.figure, include_plotly=include_plotly, div_id=spec.key),
+            compiler_pair=spec.compiler_pair,
         )
         include_plotly = False
+    return views
+
+
+def _suite_drilldown_views(data: AnalysisReportData) -> list[FigureView]:
+    views = []
+    for spec in build_suite_drilldown_figures(data):
+        views.append(
+            FigureView(
+                key=spec.key,
+                title=spec.title,
+                description=spec.description,
+                html=render_figure_html(spec.figure, include_plotly=False, div_id=spec.key),
+                compiler_pair=spec.compiler_pair,
+            )
+        )
     return views
 
 

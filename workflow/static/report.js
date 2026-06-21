@@ -28,3 +28,58 @@ document.addEventListener("input", (event) => {
   const tableId = event.target.dataset.search || event.target.dataset.filter;
   if (tableId) applyTableFilters(tableId);
 });
+
+function showSuiteDrilldown(compilerPair, options = {}) {
+  if (!compilerPair) return;
+
+  const panels = Array.from(document.querySelectorAll("[data-suite-drilldown]"));
+  const buttons = Array.from(document.querySelectorAll("[data-suite-drilldown-button]"));
+  const placeholder = document.querySelector("[data-suite-drilldown-placeholder]");
+  let selectedPanel = null;
+
+  for (const panel of panels) {
+    const isSelected = panel.dataset.compilerPair === compilerPair;
+    panel.hidden = !isSelected;
+    if (isSelected) selectedPanel = panel;
+  }
+
+  for (const button of buttons) {
+    button.classList.toggle("is-active", button.dataset.suiteDrilldownButton === compilerPair);
+  }
+
+  if (placeholder) placeholder.hidden = Boolean(selectedPanel);
+  if (!selectedPanel) return;
+
+  resizePlotlyGraphs(selectedPanel);
+  if (options.scroll) {
+    selectedPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function resizePlotlyGraphs(container) {
+  if (!window.Plotly || !window.Plotly.Plots) return;
+  for (const graph of container.querySelectorAll(".plotly-graph-div")) {
+    window.Plotly.Plots.resize(graph);
+  }
+}
+
+function setupSuiteDrilldown() {
+  const matrix = document.getElementById("compiler_pair_matrix");
+  if (matrix && typeof matrix.on === "function") {
+    matrix.on("plotly_click", (event) => {
+      const point = event.points && event.points[0];
+      if (point && point.y) {
+        showSuiteDrilldown(String(point.y), { scroll: true });
+      }
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-suite-drilldown-button]");
+    if (button) {
+      showSuiteDrilldown(button.dataset.suiteDrilldownButton, { scroll: true });
+    }
+  });
+}
+
+setupSuiteDrilldown();

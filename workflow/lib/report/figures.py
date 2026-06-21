@@ -21,6 +21,7 @@ class FigureSpec:
     title: str
     description: str
     figure: go.Figure
+    compiler_pair: str = ""
 
 
 def build_figures(data: AnalysisReportData) -> list[FigureSpec]:
@@ -38,12 +39,6 @@ def build_figures(data: AnalysisReportData) -> list[FigureSpec]:
             _compiler_pair_trend_heatmap(data),
         ),
         FigureSpec(
-            "suite_metric_matrix",
-            "Suite Contribution By LLVM Version Pair",
-            "For each LLVM version pair and suite, color and cell text show median normalized change. Hover shows changed row count.",
-            _suite_contribution_heatmap(data),
-        ),
-        FigureSpec(
             "largest_changes",
             "Largest Normalized Changes",
             "Improvement bars point right; regression bars point left. Labels and hover include the suite.",
@@ -58,8 +53,34 @@ def build_figures(data: AnalysisReportData) -> list[FigureSpec]:
     ]
 
 
-def render_figure_html(figure: go.Figure, *, include_plotly: bool) -> str:
-    return figure.to_html(full_html=False, include_plotlyjs=include_plotly)
+def build_suite_drilldown_figures(data: AnalysisReportData) -> list[FigureSpec]:
+    summary = compiler_pair_suite_metric_summary(data.metric_comparisons)
+    if summary.empty:
+        return []
+
+    figures = []
+    for compiler_pair in sorted(summary["compiler_pair"].dropna().astype(str).unique()):
+        pair_summary = summary[summary["compiler_pair"].astype(str) == compiler_pair]
+        figures.append(
+            FigureSpec(
+                key=f"suite_drilldown_{_slugify(compiler_pair)}",
+                title=f"Suite Contribution For {compiler_pair}",
+                description=(
+                    "This drilldown keeps the selected LLVM version pair fixed and shows which suite/metric "
+                    "contributes to the trend."
+                ),
+                figure=_suite_contribution_heatmap(pair_summary),
+                compiler_pair=compiler_pair,
+            )
+        )
+    return figures
+
+
+def render_figure_html(figure: go.Figure, *, include_plotly: bool, div_id: str | None = None) -> str:
+    kwargs: dict[str, object] = {}
+    if div_id:
+        kwargs["div_id"] = div_id
+    return figure.to_html(full_html=False, include_plotlyjs=include_plotly, **kwargs)
 
 
 def _classification_counts_figure(data: AnalysisReportData) -> go.Figure:
@@ -210,15 +231,13 @@ def _compiler_pair_trend_heatmap(data: AnalysisReportData) -> go.Figure:
     return fig
 
 
-def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
-    summary = compiler_pair_suite_metric_summary(data.metric_comparisons)
+def _suite_contribution_heatmap(summary: pd.DataFrame) -> go.Figure:
     if summary.empty:
         return go.Figure()
 
     summary = summary.copy()
-    summary["compiler_pair_suite"] = summary["compiler_pair"].astype(str) + " | " + summary["suite_name"].astype(str)
     pivot = summary.pivot_table(
-        index="compiler_pair_suite",
+        index="suite_name",
         columns="metric",
         values="median_normalized_change_percent",
         aggfunc="first",
@@ -228,10 +247,10 @@ def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
         list(pivot.index),
         list(pivot.columns),
         include_suite=True,
-        row_key="compiler_pair_suite",
+        row_key="suite_name",
     )
     zmin, zmax = _symmetric_color_bounds(pivot.values)
-    height = max(380, min(820, 220 + len(pivot.index) * 44))
+    height = max(320, min(520, 220 + len(pivot.index) * 58))
     fig = go.Figure(
         go.Heatmap(
             z=pivot.values,
@@ -247,7 +266,7 @@ def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
             colorbar=dict(title="Median<br>change %"),
             hovertemplate=(
                 "LLVM pair=%{customdata[8]}<br>"
-                "suite=%{customdata[9]}<br>"
+                "suite=%{y}<br>"
                 "metric=%{x}<br>"
                 "median change=%{z:+.2f}%<br>"
                 "mean change=%{customdata[0]:+.2f}%<br>"
@@ -257,7 +276,7 @@ def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
             ),
         )
     )
-    fig.update_layout(template="plotly_white", height=height, margin=dict(l=260, r=40, t=30, b=80))
+    fig.update_layout(template="plotly_white", height=height, margin=dict(l=110, r=40, t=30, b=80))
     return fig
 
 
@@ -350,3 +369,13 @@ def _zoomed_axis_range(values: pd.Series) -> tuple[float | None, float | None]:
         return minimum - padding, maximum + padding
     padding = (maximum - minimum) * 0.12
     return max(0.0, minimum - padding), maximum + padding
+
+
+def _slugify(value: str) -> str:
+    slug = []
+    for character in value.lower():
+        if character.isalnum():
+            slug.append(character)
+        elif slug and slug[-1] != "_":
+            slug.append("_")
+    return "".join(slug).strip("_") or "item"

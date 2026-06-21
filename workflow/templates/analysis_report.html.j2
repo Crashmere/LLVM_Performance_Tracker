@@ -73,42 +73,11 @@
         <p class="muted">{{ classification_figure.description }}</p>
         {{ classification_figure.html | safe }}
       </div>
-    </section>
-
-    <section class="panel chart-panel" id="trends">
-      <div class="section-heading">
-        <p class="eyebrow">Trends</p>
-        <h2>{{ compiler_pair_figure.title }}</h2>
-        <p class="muted">{{ compiler_pair_figure.description }}</p>
-        <p class="muted">
-          Use this view to find which LLVM version pair and metric changed most clearly.
-          Then move to the suite contribution view to locate where that change came from.
-        </p>
-        <p class="action-link">
-          <a href="#suites">Drill down by suite</a>
-          <a href="#comparisons">Inspect comparison rows</a>
-        </p>
-      </div>
-      {{ compiler_pair_figure.html | safe }}
-    </section>
-
-    <section class="panel chart-panel" id="suites">
-      <div class="section-heading">
-        <p class="eyebrow">Suites</p>
-        <h2>{{ suite_contribution_figure.title }}</h2>
-        <p class="muted">{{ suite_contribution_figure.description }}</p>
-        <p class="muted">
-          Rows combine an LLVM version pair and suite, so this section explains whether a trend is mostly coming from Official, RAJA, or both.
-        </p>
-        <p class="action-link">
-          <a href="#top-changes">Open concrete top changes</a>
-          <a href="#comparisons">Inspect comparison rows</a>
-        </p>
-      </div>
-      {{ suite_contribution_figure.html | safe }}
-
       <div class="subsection">
         <h3>Official And RAJA Summary</h3>
+        <p class="muted">
+          These cards summarize suite-level coverage. Detailed suite contribution is shown on demand from the LLVM version pair matrix below.
+        </p>
         <div class="suite-grid">
           {% if suite_cards %}
           {% for suite in suite_cards %}
@@ -130,6 +99,57 @@
           <p class="muted">No suite data available.</p>
           {% endif %}
         </div>
+      </div>
+    </section>
+
+    <section class="panel chart-panel" id="trends">
+      <div class="section-heading">
+        <p class="eyebrow">Trends</p>
+        <h2>{{ compiler_pair_figure.title }}</h2>
+        <p class="muted">{{ compiler_pair_figure.description }}</p>
+        <p class="muted">
+          Use this view to find which LLVM version pair and metric changed most clearly.
+          Click a cell or row to reveal suite-level contribution for that version pair.
+        </p>
+        <p class="action-link">
+          <a href="#suite-drilldown">Open suite drilldown</a>
+          <a href="#comparisons">Inspect comparison rows</a>
+        </p>
+      </div>
+      {{ compiler_pair_figure.html | safe }}
+      <div class="drilldown-panel" id="suite-drilldown">
+        <div class="section-heading compact-heading">
+          <p class="eyebrow">Suite drilldown</p>
+          <h3>Suite Contribution For Selected LLVM Version Pair</h3>
+          <p class="muted">
+            This area stays quiet until a version pair is selected. It then shows whether the trend is mostly from Official, RAJA, or both.
+          </p>
+        </div>
+        {% if suite_drilldown_figures %}
+        <div class="drilldown-buttons" aria-label="Select LLVM version pair for suite drilldown">
+          {% for figure in suite_drilldown_figures %}
+          <button type="button" data-suite-drilldown-button="{{ figure.compiler_pair }}">{{ figure.compiler_pair }}</button>
+          {% endfor %}
+        </div>
+        <div class="drilldown-placeholder" data-suite-drilldown-placeholder>
+          Click any cell in the LLVM Version Pair Trend Matrix to reveal the corresponding suite contribution.
+        </div>
+        {% for figure in suite_drilldown_figures %}
+        <article class="suite-drilldown" data-suite-drilldown data-compiler-pair="{{ figure.compiler_pair }}" hidden>
+          <div class="section-heading compact-heading">
+            <h3>{{ figure.title }}</h3>
+            <p class="muted">{{ figure.description }}</p>
+            <p class="action-link">
+              <a href="#top-changes">Open concrete top changes</a>
+              <a href="#comparisons">Inspect comparison rows</a>
+            </p>
+          </div>
+          {{ figure.html | safe }}
+        </article>
+        {% endfor %}
+        {% else %}
+        <p class="muted">No suite drilldown data available.</p>
+        {% endif %}
       </div>
     </section>
 

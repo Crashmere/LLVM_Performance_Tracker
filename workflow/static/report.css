@@ -98,6 +98,46 @@ code { background: #efe5d2; border-radius: 6px; padding: 2px 6px; }
   margin-top: 20px;
   padding: 16px;
 }
+.compact-heading { margin-bottom: 12px; }
+.drilldown-panel {
+  background: rgba(255,255,255,0.48);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  margin-top: 22px;
+  padding: 18px;
+}
+.drilldown-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+.drilldown-buttons button {
+  background: #fffaf0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+.drilldown-buttons button:hover,
+.drilldown-buttons button.is-active {
+  background: #213b33;
+  color: #fffaf0;
+}
+.drilldown-placeholder {
+  background: #efe5d2;
+  border: 1px dashed #c8b894;
+  border-radius: 14px;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 18px;
+}
+.suite-drilldown {
+  margin-top: 14px;
+}
 .cards, .mini-cards {
   display: grid;
   gap: 14px;
