@@ -47,7 +47,7 @@ def build_figures(data: AnalysisReportData) -> list[FigureSpec]:
         FigureSpec(
             "sample_noise",
             "Noisiest Sample Groups",
-            "Coefficient of variation highlights unstable measurements. The x-axis is zoomed to distinguish close top values.",
+            "Coefficient of variation highlights unstable measurements. Equal-length bars usually mean the CV values are genuinely tied.",
             _sample_noise_figure(data),
         ),
     ]
@@ -154,15 +154,11 @@ def _sample_noise_figure(data: AnalysisReportData) -> go.Figure:
         return go.Figure()
 
     fig = go.Figure(
-        go.Scatter(
+        go.Bar(
             x=noisy["cv"],
             y=noisy["display_name"],
-            mode="markers",
-            marker=dict(
-                color="rgba(70, 111, 171, 0.88)",
-                line=dict(color="rgba(31, 43, 37, 0.38)", width=1),
-                size=12,
-            ),
+            orientation="h",
+            marker_color="rgba(70, 111, 171, 0.85)",
             customdata=noisy[
                 [
                     "rank",
@@ -189,11 +185,11 @@ def _sample_noise_figure(data: AnalysisReportData) -> go.Figure:
             ),
         )
     )
-    xmin, xmax = _zoomed_axis_range(noisy["cv"])
+    xmax = _zero_based_axis_max(noisy["cv"])
     fig.update_layout(template="plotly_white", height=620, margin=dict(l=300, r=40, t=30, b=50))
     fig.update_xaxes(title_text="Coefficient of variation")
-    if xmin is not None and xmax is not None:
-        fig.update_xaxes(range=[xmin, xmax])
+    if xmax is not None:
+        fig.update_xaxes(range=[0, xmax])
     fig.update_yaxes(autorange="reversed")
     return fig
 
@@ -366,17 +362,12 @@ def _trend_colorscale() -> list[list[object]]:
     ]
 
 
-def _zoomed_axis_range(values: pd.Series) -> tuple[float | None, float | None]:
+def _zero_based_axis_max(values: pd.Series) -> float | None:
     numeric = pd.to_numeric(values, errors="coerce").dropna()
     if numeric.empty:
-        return None, None
-    minimum = float(numeric.min())
+        return None
     maximum = float(numeric.max())
-    if minimum == maximum:
-        padding = max(abs(maximum) * 0.05, 0.000001)
-        return minimum - padding, maximum + padding
-    padding = (maximum - minimum) * 0.12
-    return max(0.0, minimum - padding), maximum + padding
+    return maximum * 1.08 if maximum > 0 else 1.0
 
 
 def _slugify(value: str) -> str:
