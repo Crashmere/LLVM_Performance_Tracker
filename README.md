@@ -1366,11 +1366,10 @@ http://localhost:8000/auto/reports/analysis_report.html
 
 #### 当前限制与后续增强
 
-- 当前图表可以发现变化数量和极端变化，但还没有专门展示某个 LLVM version pair 在某个 metric 上整体趋势的图。
-- `compiler_pair_matrix` 展示的是变化行数量，不直接展示改善/回归方向和幅度分布。
 - failed / missing results 目前仍主要通过 Snakemake 日志、metadata 和 inspect 工具分析，报告中尚未做专门展示。
 - 当前 report 是静态 HTML，不提供服务端查询或动态加载大 CSV。
 - 如果 HTML 表格数据继续变大，后续可以考虑分页、客户端排序或更轻量的数据加载策略。
+- 对极短 Official test-suite 程序，raw `exec_time` 可能直接出现 `0.0`。当前报告会用 Sample Stability 暴露高 CV，但尚未在 analysis schema 中单独标记 timing-floor artifact。
 
 #### 验证与结果
 
@@ -1394,4 +1393,131 @@ Render the stage-six analysis dataset as a self-contained static HTML report, ad
 - I refactored report generation into a clearer structure with `workflow/lib/report/`, Jinja2 templates, and static CSS/JS.
 - I kept the report self-contained so it can be archived and opened offline.
 - I added `./run.sh report` as a development shortcut for regenerating the report from existing analysis data without rerunning benchmarks.
-- I documented current limitations, especially that the version-pair matrix shows change counts rather than full direction/magnitude trends.
+- I documented the remaining report UX limitations, which were then addressed in the follow-up visualization refinement work.
+
+### 阶段七后续优化：报告可视化分析体验升级
+
+这一轮是在阶段七全局 HTML report 已经跑通之后，对报告的分析体验做进一步打磨。触发背景是导师反馈：原先的图表能把数据展示出来，但用户很难顺着图表回答“哪个 LLVM 版本变化值得关注、变化方向是什么、变化来自哪个 suite、具体是哪几个 test/kernel 贡献最大、这些结论是否受到 noisy sample 影响”。
+
+因此这一轮没有改变 Snakemake 主线，也没有新增数据采集逻辑，而是继续基于阶段六的 `auto/analysis/` 产物，在 report 层重新组织图表、页面结构和轻量交互。
+
+#### 主要设计决策
+
+- 报告继续保持单文件静态 HTML，不引入 Dash、Streamlit、React/Vue/Svelte 或服务端 dashboard。
+- LLVM/compiler version pair 仍然是报告的主分析轴；suite 信息作为下钻上下文，而不是和 compiler version 平行竞争。
+- 优先改造已有图表，不盲目增加大量新图，避免报告认知负担继续上升。
+- 图表负责发现趋势和异常，表格负责核对明细；二者通过 section 顺序、筛选字段和 hover 信息建立联系。
+- suite drilldown 合并到 Trends 区域，不再作为单独的大 section。
+- `./run.sh report` 仍只是基于已有 `auto/analysis/` 快速重生成 HTML 的辅助入口，不替代主 workflow。
+
+#### 图表与页面结构优化
+
+- `LLVM Version Pair Trend Matrix`
+  - 原先主要展示变化行数量，现在改为展示每个 LLVM version pair / metric 的 `median_normalized_change_percent`。
+  - 颜色语义改为趋势方向：绿色表示 candidate 版本整体改善，红色表示 candidate 版本整体退化。
+  - hover 中补充 changed rows、improvement/regression/stable 数量、candidate/reliable change 数量和 mean change。
+  - 修复矩阵色域问题，使用围绕 0 的对称色域，避免出现“数值更大但颜色更浅”的误导。
+
+- `Suite Contribution For Selected LLVM Version Pair`
+  - 不再把 suite/metric 汇总作为独立 section 展示。
+  - 在 Trends 中通过下拉框或点击 version-pair matrix cell 选择某个 LLVM version pair。
+  - 选择后只展示该 version pair 下 Official / RAJA 对各 metric 的贡献，帮助用户从“版本 pair 变化明显”继续追问“变化主要来自哪个 suite”。
+  - 当 compiler version 数量增加时，下拉框比一排按钮更稳定，不会把页面撑得杂乱。
+
+- `Top LLVM Version Regressions And Improvements`
+  - `Largest Normalized Changes` 中的 y 轴 label 和 hover 都加入 suite 信息。
+  - y 轴 label 使用 `suite | metric | compiler pair | test` 的组合，避免用户只能从 test name 猜 suite。
+  - 对重复 test 出现在不同 version pair 的情况，改用唯一数值 y 坐标和自定义 tick label，避免 Plotly 把同名类别合并成一根条。
+  - Top Regressions 和 Top Improvements 两张表固定为等宽布局；筛选控件统一为两行，避免因为 `Improvements` 单词较长导致左右宽度不一致。
+  - 两个表格标题和上方图表之间增加间距，让视觉层次更清楚。
+
+- `Sample Stability`
+  - 图表改回横向条形图，继续从 0 开始展示 CV，避免过度放大非常接近的 noisy groups。
+  - hover 中提高 CV 精度，同时展示 rank、suite、suite version、compiler version、metric、mean、std 和 observations。
+  - 文案明确说明：如果 top items 看起来长度几乎一样，可能是 CV 值真实相同或非常接近，不一定是图表错误。
+  - 已确认一类高 CV 的来源是 `[0, 0, x]` 这类原始观测。对极短 Official test-suite 程序，LLVM test-suite 会从 `.time` 文件提取 `user` time 作为 `exec_time`，当程序过短时 raw JSON 中就可能记录 `exec_time = 0.0`。
+  - 这类数据后续适合在 analysis 或 report 层标记为 `timing_floor_limited` / `has_zero_observations` 等低可信 timing-resolution artifact。
+
+- 页面导航
+  - 顶部导航加入滑块式当前位置指示。
+  - 手动滚动时，滑块跟随当前 section。
+  - 点击导航跳转时，滑块会先锁定到目标 section，等平滑滚动结束后再恢复 scrollspy，避免滑块在跳转途中被中间 section 来回带动。
+  - 在移动端保留简化表现，避免小屏布局复杂化。
+
+- 页面布局
+  - Overview 中去掉意义不大的 Samples 小卡片。
+  - Official / RAJA Summary 的小卡片布局调整为更整齐的两行。
+  - 去掉多个“跳转到表格”的按钮，减少页面噪音。
+  - Trends、Top Changes、Noise、Data 的顺序更加贴近用户分析路径：先看版本趋势，再看具体变化，再检查稳定性，最后核对表格。
+
+#### 代码修改范围
+
+- `workflow/lib/report/data.py`
+  - 新增 report-only 聚合 helper：
+    - `compiler_pair_metric_summary()`
+    - `compiler_pair_suite_metric_summary()`
+    - `top_change_rows_with_context()`
+    - `noise_plot_rows()`
+  - 这些 helper 只服务于 HTML 展示，不改变阶段六 CSV schema。
+
+- `workflow/lib/report/figures.py`
+  - 将 version pair 图升级为趋势 heatmap。
+  - 新增 suite drilldown heatmap 生成逻辑。
+  - 优化 largest changes 和 sample noise 图的 label、hover、颜色和坐标。
+
+- `workflow/lib/report/views.py`
+  - 组织新的 report context。
+  - 将 suite summary 合并到 overview。
+  - 将 suite drilldown figure 传给 Trends section。
+  - 增强 comparison / top changes / sample statistics 表格筛选字段。
+
+- `workflow/templates/analysis_report.html.j2`
+  - 调整 section 顺序和文案。
+  - 将 suite drilldown 嵌入 Trends。
+  - 精简不必要的跳转按钮。
+
+- `workflow/static/report.css`
+  - 增加导航滑块样式。
+  - 调整 top changes、suite cards、drilldown、表格筛选控件和响应式布局。
+
+- `workflow/static/report.js`
+  - 增加导航 scrollspy。
+  - 增加点击导航时的目标锁定逻辑。
+  - 增加 suite drilldown 的 Plotly click 和下拉框联动。
+  - 保留原有表格搜索和筛选逻辑。
+
+- `work_plan.md`
+  - 补充报告可视化体验升级规划。
+  - 增加关于 `exec_time = 0.0` / timing-floor artifact 的未来 optional task。
+
+#### 当前报告阅读路径
+
+建议阅读报告时按以下顺序：
+
+1. 先看 `Overview`，确认当前报告纳入了哪些 compiler versions、suite versions、labels 和 classification 数量。
+2. 再看 `Trends` 的 `LLVM Version Pair Trend Matrix`，确认哪个 LLVM version pair / metric 整体偏 improvement 或 regression。
+3. 对感兴趣的 version pair，使用 suite drilldown 下拉框或点击矩阵 cell，查看 Official 与 RAJA 分别贡献了哪些 metric 变化。
+4. 进入 `Top Changes`，查看具体 test/kernel，并用 suite-aware label 判断它来自 Official 还是 RAJA。
+5. 查看 `Sample Stability`，判断这些变化是否可能受 noisy sample 影响。
+6. 最后到 `Data` 表格中用 suite、metric、compiler pair、classification、evidence 等字段筛选并核对原始 comparison 行。
+
+#### 验证与结果
+
+- 已执行 `./run.sh report`，确认可以基于现有 `auto/analysis/` 重新生成 `auto/reports/analysis_report.html`。
+- 已执行 `git diff --check` 检查格式。
+- 已确认生成的 HTML 中包含新的导航锁定逻辑。
+- 已用现有 `auto/analysis/` 数据检查主要图表可以正常渲染。
+
+#### Commit Message
+
+Improve analysis report visual workflow.
+Turn the version-pair matrix into a directional trend view, add suite drilldown for selected LLVM pairs, enrich top-change and noise charts with suite and precision context, simplify report navigation, and refine the static HTML interaction model.
+
+#### Weekly Update
+
+- This week I refined the global HTML report so it better supports the actual analysis workflow rather than only displaying tables and charts.
+- I changed the LLVM version-pair matrix to show directional normalized-change trends, with green for improvement and red for regression.
+- I added suite-level drilldown for a selected LLVM version pair, so users can move from a compiler-pair trend to Official/RAJA contribution.
+- I improved the top regression/improvement chart by adding suite context and preventing repeated test labels from being visually merged.
+- I improved the sample stability section with clearer CV precision and documented that raw zero `exec_time` values can be timing-resolution artifacts for very short Official tests.
+- I cleaned up the report layout, table controls, navigation slider, and click/scroll behavior while keeping the report as a self-contained static HTML file.
