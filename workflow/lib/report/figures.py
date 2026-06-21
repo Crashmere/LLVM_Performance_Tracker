@@ -5,8 +5,14 @@ from dataclasses import dataclass
 import pandas as pd
 import plotly.graph_objects as go
 
-from workflow.lib.report.data import AnalysisReportData, suite_metric_summary, top_cv_rows
-from workflow.lib.report.tables import classification_color, shorten
+from workflow.lib.report.data import (
+    AnalysisReportData,
+    compiler_pair_metric_summary,
+    compiler_pair_suite_metric_summary,
+    noise_plot_rows,
+    top_change_rows_with_context,
+)
+from workflow.lib.report.tables import classification_color
 
 
 @dataclass(frozen=True)
@@ -27,26 +33,26 @@ def build_figures(data: AnalysisReportData) -> list[FigureSpec]:
         ),
         FigureSpec(
             "compiler_pair_matrix",
-            "Change Distribution By LLVM Version Pair",
-            "Changed rows grouped by baseline/candidate LLVM version pair and metric.",
-            _compiler_pair_heatmap(data),
+            "LLVM Version Pair Trend Matrix",
+            "Color shows median normalized change: green is improvement, red is regression. Cell text shows changed row count.",
+            _compiler_pair_trend_heatmap(data),
         ),
         FigureSpec(
             "suite_metric_matrix",
-            "Change Distribution By Suite And Metric",
-            "Counts of changed rows by suite and metric.",
-            _suite_metric_heatmap(data),
+            "Suite Contribution By LLVM Version Pair",
+            "For each LLVM version pair and suite, color shows median normalized change and text shows changed row count.",
+            _suite_contribution_heatmap(data),
         ),
         FigureSpec(
             "largest_changes",
             "Largest Normalized Changes",
-            "Improvement bars point right; regression bars point left.",
+            "Improvement bars point right; regression bars point left. Labels and hover include the suite.",
             _top_change_figure(data),
         ),
         FigureSpec(
             "sample_noise",
             "Noisiest Sample Groups",
-            "Coefficient of variation highlights tests with unstable measurements.",
+            "Coefficient of variation highlights unstable measurements. The x-axis is zoomed to distinguish close top values.",
             _sample_noise_figure(data),
         ),
     ]
@@ -68,14 +74,10 @@ def _classification_counts_figure(data: AnalysisReportData) -> go.Figure:
 
 
 def _top_change_figure(data: AnalysisReportData) -> go.Figure:
-    regressions = data.top_regressions.head(10).copy()
-    improvements = data.top_improvements.head(10).copy()
-    combined = pd.concat([improvements, regressions], ignore_index=True)
+    combined = top_change_rows_with_context(data.top_regressions, data.top_improvements, limit_each=10)
     if combined.empty:
         return go.Figure()
 
-    combined["normalized_change_percent"] = pd.to_numeric(combined["normalized_change_percent"], errors="coerce")
-    combined["short_name"] = combined["test_name"].astype(str).map(shorten)
     colors = [
         "rgba(26, 127, 80, 0.85)" if value > 0 else "rgba(184, 69, 56, 0.85)"
         for value in combined["normalized_change_percent"].fillna(0)
@@ -83,48 +85,63 @@ def _top_change_figure(data: AnalysisReportData) -> go.Figure:
     fig = go.Figure(
         go.Bar(
             x=combined["normalized_change_percent"],
-            y=combined["short_name"],
+            y=combined["suite_aware_label"],
             orientation="h",
             marker_color=colors,
             customdata=combined[
                 [
+                    "suite_name",
+                    "test_name",
                     "metric",
+                    "metric_display_name",
                     "baseline_compiler_version",
                     "candidate_compiler_version",
+                    "baseline_suite_version",
+                    "candidate_suite_version",
                     "classification",
                     "evidence",
                 ]
             ],
             hovertemplate=(
-                "%{y}<br>%{x:.2f}%<br>%{customdata[0]}<br>"
-                "LLVM %{customdata[1]} -> %{customdata[2]}<br>"
-                "%{customdata[3]} / %{customdata[4]}<extra></extra>"
+                "suite=%{customdata[0]}<br>"
+                "test=%{customdata[1]}<br>"
+                "metric=%{customdata[2]} (%{customdata[3]})<br>"
+                "normalized change=%{x:+.2f}%<br>"
+                "LLVM %{customdata[4]} -> %{customdata[5]}<br>"
+                "suite version %{customdata[6]} -> %{customdata[7]}<br>"
+                "%{customdata[8]} / %{customdata[9]}<extra></extra>"
             ),
         )
     )
     fig.update_layout(template="plotly_white", height=620, margin=dict(l=220, r=40, t=30, b=50))
     fig.update_xaxes(title_text="Normalized change (%; positive is improvement)")
+    fig.add_vline(x=0, line_width=1, line_color="rgba(96, 113, 128, 0.65)")
     return fig
 
 
 def _sample_noise_figure(data: AnalysisReportData) -> go.Figure:
-    noisy = top_cv_rows(data.sample_statistics, 20)
+    noisy = noise_plot_rows(data.sample_statistics, 20)
     if noisy.empty:
         return go.Figure()
 
-    noisy["display_name"] = noisy.apply(_sample_noise_label, axis=1)
     fig = go.Figure(
-        go.Bar(
+        go.Scatter(
             x=noisy["cv"],
             y=noisy["display_name"],
-            orientation="h",
-            marker_color="rgba(70, 111, 171, 0.85)",
+            mode="markers",
+            marker=dict(
+                color="rgba(70, 111, 171, 0.88)",
+                line=dict(color="rgba(31, 43, 37, 0.38)", width=1),
+                size=12,
+            ),
             customdata=noisy[
                 [
+                    "rank",
                     "suite_name",
                     "suite_version",
                     "compiler_version",
                     "metric",
+                    "cv_percent",
                     "observations",
                     "mean",
                     "std",
@@ -132,86 +149,169 @@ def _sample_noise_figure(data: AnalysisReportData) -> go.Figure:
                 ]
             ],
             hovertemplate=(
-                "%{customdata[7]}<br>"
-                "LLVM=%{customdata[2]}<br>"
-                "suite=%{customdata[0]} %{customdata[1]}<br>"
-                "metric=%{customdata[3]}<br>"
-                "CV=%{x:.4f}<br>"
-                "mean=%{customdata[5]:.6g}, std=%{customdata[6]:.6g}<br>"
-                "observations=%{customdata[4]}<extra></extra>"
+                "rank=%{customdata[0]}<br>"
+                "%{customdata[9]}<br>"
+                "LLVM=%{customdata[3]}<br>"
+                "suite=%{customdata[1]} %{customdata[2]}<br>"
+                "metric=%{customdata[4]}<br>"
+                "CV=%{x:.6g} (%{customdata[5]:.4f}%)<br>"
+                "mean=%{customdata[7]:.6g}, std=%{customdata[8]:.6g}<br>"
+                "observations=%{customdata[6]}<extra></extra>"
             ),
         )
     )
-    fig.update_layout(template="plotly_white", height=620, margin=dict(l=280, r=40, t=30, b=50))
+    xmin, xmax = _zoomed_axis_range(noisy["cv"])
+    fig.update_layout(template="plotly_white", height=620, margin=dict(l=300, r=40, t=30, b=50))
     fig.update_xaxes(title_text="Coefficient of variation")
+    if xmin is not None and xmax is not None:
+        fig.update_xaxes(range=[xmin, xmax])
     fig.update_yaxes(autorange="reversed")
     return fig
 
 
-def _sample_noise_label(row: pd.Series) -> str:
-    compiler = str(row.get("compiler_version", "unknown"))
-    metric = str(row.get("metric", "metric"))
-    test_name = shorten(str(row.get("test_name", "unknown")), 72)
-    return f"{compiler} | {metric} | {test_name}"
-
-
-def _compiler_pair_heatmap(data: AnalysisReportData) -> go.Figure:
-    comparisons = data.metric_comparisons.copy()
-    required = {
-        "baseline_compiler_version",
-        "candidate_compiler_version",
-        "metric",
-        "classification",
-    }
-    if comparisons.empty or not required.issubset(comparisons.columns):
-        return go.Figure()
-
-    changed = comparisons[comparisons["classification"].astype(str) != "stable"].copy()
-    if changed.empty:
-        changed = comparisons
-    changed["compiler_pair"] = (
-        changed["baseline_compiler_version"].astype(str)
-        + " -> "
-        + changed["candidate_compiler_version"].astype(str)
-    )
-    pivot = changed.pivot_table(
-        index="compiler_pair",
-        columns="metric",
-        values="classification",
-        aggfunc="count",
-        fill_value=0,
-    )
-    fig = go.Figure(
-        go.Heatmap(
-            z=pivot.values,
-            x=list(pivot.columns),
-            y=list(pivot.index),
-            colorscale="Blues",
-            hovertemplate="LLVM pair=%{y}<br>metric=%{x}<br>rows=%{z}<extra></extra>",
-        )
-    )
-    fig.update_layout(template="plotly_white", height=360, margin=dict(l=180, r=40, t=30, b=80))
-    return fig
-
-
-def _suite_metric_heatmap(data: AnalysisReportData) -> go.Figure:
-    summary = suite_metric_summary(data.metric_comparisons)
+def _compiler_pair_trend_heatmap(data: AnalysisReportData) -> go.Figure:
+    summary = compiler_pair_metric_summary(data.metric_comparisons)
     if summary.empty:
         return go.Figure()
 
-    changed = summary[summary["classification"].astype(str) != "stable"]
-    if changed.empty:
-        changed = summary
-    pivot = changed.pivot_table(index="suite_name", columns="metric", values="count", aggfunc="sum", fill_value=0)
+    pivot = summary.pivot_table(
+        index="compiler_pair",
+        columns="metric",
+        values="median_normalized_change_percent",
+        aggfunc="first",
+    )
+    text, customdata = _heatmap_text_and_customdata(summary, list(pivot.index), list(pivot.columns), include_suite=False)
     fig = go.Figure(
         go.Heatmap(
             z=pivot.values,
             x=list(pivot.columns),
             y=list(pivot.index),
-            colorscale="YlOrRd",
-            hovertemplate="suite=%{y}<br>metric=%{x}<br>rows=%{z}<extra></extra>",
+            text=text,
+            texttemplate="%{text}",
+            customdata=customdata,
+            colorscale=_trend_colorscale(),
+            zmid=0,
+            colorbar=dict(title="Median<br>change %"),
+            hovertemplate=(
+                "LLVM pair=%{y}<br>"
+                "metric=%{x}<br>"
+                "median change=%{z:+.2f}%<br>"
+                "mean change=%{customdata[0]:+.2f}%<br>"
+                "changed rows=%{customdata[1]} of %{customdata[2]}<br>"
+                "improvements=%{customdata[3]}, regressions=%{customdata[4]}, stable=%{customdata[5]}<br>"
+                "reliable changes=%{customdata[6]}, candidate changes=%{customdata[7]}<extra></extra>"
+            ),
         )
     )
-    fig.update_layout(template="plotly_white", height=360, margin=dict(l=80, r=40, t=30, b=80))
+    fig.update_layout(template="plotly_white", height=380, margin=dict(l=180, r=40, t=30, b=80))
     return fig
 
+
+def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
+    summary = compiler_pair_suite_metric_summary(data.metric_comparisons)
+    if summary.empty:
+        return go.Figure()
+
+    summary = summary.copy()
+    summary["compiler_pair_suite"] = summary["compiler_pair"].astype(str) + " | " + summary["suite_name"].astype(str)
+    pivot = summary.pivot_table(
+        index="compiler_pair_suite",
+        columns="metric",
+        values="median_normalized_change_percent",
+        aggfunc="first",
+    )
+    text, customdata = _heatmap_text_and_customdata(
+        summary,
+        list(pivot.index),
+        list(pivot.columns),
+        include_suite=True,
+        row_key="compiler_pair_suite",
+    )
+    height = max(380, min(820, 220 + len(pivot.index) * 44))
+    fig = go.Figure(
+        go.Heatmap(
+            z=pivot.values,
+            x=list(pivot.columns),
+            y=list(pivot.index),
+            text=text,
+            texttemplate="%{text}",
+            customdata=customdata,
+            colorscale=_trend_colorscale(),
+            zmid=0,
+            colorbar=dict(title="Median<br>change %"),
+            hovertemplate=(
+                "LLVM pair=%{customdata[8]}<br>"
+                "suite=%{customdata[9]}<br>"
+                "metric=%{x}<br>"
+                "median change=%{z:+.2f}%<br>"
+                "mean change=%{customdata[0]:+.2f}%<br>"
+                "changed rows=%{customdata[1]} of %{customdata[2]}<br>"
+                "improvements=%{customdata[3]}, regressions=%{customdata[4]}, stable=%{customdata[5]}<br>"
+                "reliable changes=%{customdata[6]}, candidate changes=%{customdata[7]}<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(template="plotly_white", height=height, margin=dict(l=260, r=40, t=30, b=80))
+    return fig
+
+
+def _heatmap_text_and_customdata(
+    summary: pd.DataFrame,
+    rows: list[str],
+    columns: list[str],
+    *,
+    include_suite: bool,
+    row_key: str = "compiler_pair",
+) -> tuple[list[list[str]], list[list[list[object]]]]:
+    lookup = {(str(row[row_key]), str(row["metric"])): row for _, row in summary.iterrows()}
+    text_grid: list[list[str]] = []
+    custom_grid: list[list[list[object]]] = []
+    for row_name in rows:
+        text_row: list[str] = []
+        custom_row: list[list[object]] = []
+        for column in columns:
+            record = lookup.get((str(row_name), str(column)))
+            if record is None:
+                text_row.append("")
+                custom_row.append([0.0, 0, 0, 0, 0, 0, 0, 0, "", ""])
+                continue
+            changed_count = int(record.get("changed_count", 0))
+            text_row.append(str(changed_count) if changed_count else "")
+            custom_row.append(
+                [
+                    float(record.get("mean_normalized_change_percent", 0) or 0),
+                    changed_count,
+                    int(record.get("row_count", 0)),
+                    int(record.get("improvement_count", 0)),
+                    int(record.get("regression_count", 0)),
+                    int(record.get("stable_count", 0)),
+                    int(record.get("reliable_change_count", 0)),
+                    int(record.get("candidate_change_count", 0)),
+                    str(record.get("compiler_pair", "")) if include_suite else "",
+                    str(record.get("suite_name", "")) if include_suite else "",
+                ]
+            )
+        text_grid.append(text_row)
+        custom_grid.append(custom_row)
+    return text_grid, custom_grid
+
+
+def _trend_colorscale() -> list[list[object]]:
+    return [
+        [0.0, "rgba(184, 69, 56, 0.92)"],
+        [0.5, "rgba(247, 241, 228, 0.96)"],
+        [1.0, "rgba(26, 127, 80, 0.92)"],
+    ]
+
+
+def _zoomed_axis_range(values: pd.Series) -> tuple[float | None, float | None]:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return None, None
+    minimum = float(numeric.min())
+    maximum = float(numeric.max())
+    if minimum == maximum:
+        padding = max(abs(maximum) * 0.05, 0.000001)
+        return minimum - padding, maximum + padding
+    padding = (maximum - minimum) * 0.12
+    return max(0.0, minimum - padding), maximum + padding

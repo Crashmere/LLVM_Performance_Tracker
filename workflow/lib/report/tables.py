@@ -171,7 +171,12 @@ def _format_cell(column: str, value: Any) -> str:
         return f'<span class="change {klass}">{escape(text)}</span>'
     if column == "raw_change_percent":
         return escape(f"{float(value):+.2f}%")
-    if column in {"baseline_mean", "candidate_mean", "mean", "std", "cv", "ci95_low", "ci95_high", "value"}:
+    if column == "cv":
+        try:
+            return escape(f"{float(value):.8g}")
+        except (TypeError, ValueError):
+            return escape(str(value))
+    if column in {"baseline_mean", "candidate_mean", "mean", "std", "ci95_low", "ci95_high", "value"}:
         try:
             return escape(f"{float(value):.6g}")
         except (TypeError, ValueError):
@@ -182,4 +187,3 @@ def _format_cell(column: str, value: Any) -> str:
     if column == "test_name":
         return f'<span title="{escape(str(value))}">{escape(shorten(str(value), 90))}</span>'
     return escape(str(value))
-

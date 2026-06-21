@@ -1,9 +1,12 @@
-{% macro figure_section(figure) -%}
+{% macro figure_section(figure, eyebrow="Chart", action_href="", action_label="") -%}
 <section class="panel chart-panel">
   <div class="section-heading">
-    <p class="eyebrow">Chart</p>
+    <p class="eyebrow">{{ eyebrow }}</p>
     <h2>{{ figure.title }}</h2>
     <p class="muted">{{ figure.description }}</p>
+    {% if action_href and action_label %}
+    <p class="action-link"><a href="{{ action_href }}">{{ action_label }}</a></p>
+    {% endif %}
   </div>
   {{ figure.html | safe }}
 </section>
@@ -29,10 +32,17 @@
       <p class="muted">Generated at {{ overview.generated_at }}</p>
     </section>
 
+    <nav class="report-nav" aria-label="Report sections">
+      {% for item in nav_items %}
+      <a href="{{ item.href }}">{{ item.label }}</a>
+      {% endfor %}
+    </nav>
+
     <section class="panel" id="overview">
       <div class="section-heading">
         <p class="eyebrow">Overview</p>
         <h2>Analysis Coverage</h2>
+        <p class="muted">Start here to understand which retained runs are included before looking at version trends.</p>
       </div>
       <div class="cards">
         {% for card in overview.cards %}
@@ -58,47 +68,83 @@
         <span class="pill {{ pill.kind }}">{{ pill.label }}</span>
         {% endfor %}
       </div>
+      <div class="embedded-chart">
+        <h3>{{ classification_figure.title }}</h3>
+        <p class="muted">{{ classification_figure.description }}</p>
+        {{ classification_figure.html | safe }}
+      </div>
     </section>
 
-    {% for figure in leading_figures %}
-    {{ figure_section(figure) }}
-    {% endfor %}
-
-    <section class="panel" id="suites">
+    <section class="panel chart-panel" id="trends">
       <div class="section-heading">
-        <p class="eyebrow">Suite views</p>
-        <h2>Official And RAJA Summary</h2>
+        <p class="eyebrow">Trends</p>
+        <h2>{{ compiler_pair_figure.title }}</h2>
+        <p class="muted">{{ compiler_pair_figure.description }}</p>
+        <p class="muted">
+          Use this view to find which LLVM version pair and metric changed most clearly.
+          Then move to the suite contribution view to locate where that change came from.
+        </p>
+        <p class="action-link">
+          <a href="#suites">Drill down by suite</a>
+          <a href="#comparisons">Inspect comparison rows</a>
+        </p>
       </div>
-      <div class="suite-grid">
-        {% if suite_cards %}
-        {% for suite in suite_cards %}
-        <article class="suite-card">
-          <h3>{{ suite.name }}</h3>
-          <p class="muted">Metrics: {{ suite.metrics }}</p>
-          <div class="mini-cards">
-            {% for card in suite.cards %}
-            <div class="card">
-              <span>{{ card.title }}</span>
-              <strong>{{ card.value }}</strong>
-              <em>{{ card.detail }}</em>
-            </div>
-            {% endfor %}
-          </div>
-        </article>
-        {% endfor %}
-        {% else %}
-        <p class="muted">No suite data available.</p>
-        {% endif %}
-      </div>
+      {{ compiler_pair_figure.html | safe }}
     </section>
 
-    {{ figure_section(largest_changes_figure) }}
+    <section class="panel chart-panel" id="suites">
+      <div class="section-heading">
+        <p class="eyebrow">Suites</p>
+        <h2>{{ suite_contribution_figure.title }}</h2>
+        <p class="muted">{{ suite_contribution_figure.description }}</p>
+        <p class="muted">
+          Rows combine an LLVM version pair and suite, so this section explains whether a trend is mostly coming from Official, RAJA, or both.
+        </p>
+        <p class="action-link">
+          <a href="#top-changes">Open concrete top changes</a>
+          <a href="#comparisons">Inspect comparison rows</a>
+        </p>
+      </div>
+      {{ suite_contribution_figure.html | safe }}
+
+      <div class="subsection">
+        <h3>Official And RAJA Summary</h3>
+        <div class="suite-grid">
+          {% if suite_cards %}
+          {% for suite in suite_cards %}
+          <article class="suite-card">
+            <h3>{{ suite.name }}</h3>
+            <p class="muted">Metrics: {{ suite.metrics }}</p>
+            <div class="mini-cards">
+              {% for card in suite.cards %}
+              <div class="card">
+                <span>{{ card.title }}</span>
+                <strong>{{ card.value }}</strong>
+                <em>{{ card.detail }}</em>
+              </div>
+              {% endfor %}
+            </div>
+          </article>
+          {% endfor %}
+          {% else %}
+          <p class="muted">No suite data available.</p>
+          {% endif %}
+        </div>
+      </div>
+    </section>
 
     <section class="panel" id="top-changes">
       <div class="section-heading">
         <p class="eyebrow">Priority list</p>
         <h2>Top LLVM Version Regressions And Improvements</h2>
-        <p class="muted">Positive normalized change means the candidate LLVM version is better; negative means regression. Suite versions are fixed within each comparison.</p>
+        <p class="muted">
+          Positive normalized change means the candidate LLVM version is better; negative means regression.
+          Suite versions are fixed within each comparison, and suite information is shown in the chart labels and hover.
+        </p>
+        <p class="action-link"><a href="#comparisons">Inspect related comparison rows</a></p>
+      </div>
+      <div class="chart-panel embedded-chart">
+        {{ largest_changes_figure.html | safe }}
       </div>
       <div class="split">
         <div>
@@ -116,39 +162,51 @@
       </div>
     </section>
 
-    <section class="panel" id="comparisons">
-      <div class="section-heading">
-        <p class="eyebrow">Full LLVM comparison table</p>
-        <h2>Metric Comparisons Across LLVM Versions</h2>
-        <p class="muted">Use filters to narrow the comparison table. Comparisons keep suite version fixed and vary LLVM/compiler version. The table is capped at 500 highest-change rows in HTML; the full CSV remains available.</p>
-      </div>
-      <p><a href="{{ csv_links['metric_comparisons.csv'] }}">Open full CSV</a></p>
-      {% set table = comparison_table %}
-      {% include "partials/table.html.j2" %}
-    </section>
-
-    {{ figure_section(sample_noise_figure) }}
-
-    <section class="panel" id="samples">
+    <section class="panel" id="noise">
       <div class="section-heading">
         <p class="eyebrow">Noise and confidence</p>
-        <h2>Sample Statistics</h2>
-        <p class="muted">High CV values identify noisy tests. Low observation counts explain many candidate rather than reliable classifications.</p>
+        <h2>Sample Stability</h2>
+        <p class="muted">
+          High CV values identify noisy tests. The chart uses a zoomed x-axis because the top CV values are often very close.
+          Use this section before treating candidate changes as strong evidence.
+        </p>
       </div>
-      <p><a href="{{ csv_links['sample_statistics.csv'] }}">Open full CSV</a></p>
-      {% set table = sample_table %}
-      {% include "partials/table.html.j2" %}
+      <div class="chart-panel embedded-chart">
+        {{ sample_noise_figure.html | safe }}
+      </div>
+      <div class="subsection">
+        <h3>Sample Statistics</h3>
+        <p><a href="{{ csv_links['sample_statistics.csv'] }}">Open full CSV</a></p>
+        {% set table = sample_table %}
+        {% include "partials/table.html.j2" %}
+      </div>
     </section>
 
-    <section class="panel" id="details">
+    <section class="panel" id="data">
       <div class="section-heading">
-        <p class="eyebrow">Provenance</p>
-        <h2>Analysis Record Preview</h2>
-        <p class="muted">Only the first 200 rows are embedded to keep the HTML manageable.</p>
+        <p class="eyebrow">Data</p>
+        <h2>Detailed Tables</h2>
+        <p class="muted">
+          Tables are the verification layer behind the charts. Use filters to narrow by suite, metric, compiler pair, classification, and evidence.
+        </p>
       </div>
-      <p><a href="{{ csv_links['analysis_records.csv'] }}">Open full CSV</a></p>
-      {% set table = detail_table %}
-      {% include "partials/table.html.j2" %}
+      <div class="subsection" id="comparisons">
+        <h3>Metric Comparisons Across LLVM Versions</h3>
+        <p class="muted">
+          Comparisons keep suite version fixed and vary LLVM/compiler version.
+          The table is capped at 500 highest-change rows in HTML; the full CSV remains available.
+        </p>
+        <p><a href="{{ csv_links['metric_comparisons.csv'] }}">Open full CSV</a></p>
+        {% set table = comparison_table %}
+        {% include "partials/table.html.j2" %}
+      </div>
+      <div class="subsection" id="details">
+        <h3>Analysis Record Preview</h3>
+        <p class="muted">Only the first 200 rows are embedded to keep the HTML manageable.</p>
+        <p><a href="{{ csv_links['analysis_records.csv'] }}">Open full CSV</a></p>
+        {% set table = detail_table %}
+        {% include "partials/table.html.j2" %}
+      </div>
     </section>
   </main>
   <script>{{ javascript | safe }}</script>

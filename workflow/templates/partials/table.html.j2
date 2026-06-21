@@ -13,6 +13,7 @@
     </select>
   </label>
   {% endfor %}
+  <span class="table-count" data-count="{{ table.table_id }}">{{ table.rows | length }} rows</span>
 </div>
 {% endif %}
 
@@ -40,4 +41,3 @@
 {% else %}
 <p class="muted">{{ table.empty_message }}</p>
 {% endif %}
-

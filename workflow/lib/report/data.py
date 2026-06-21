@@ -79,6 +79,109 @@ def top_cv_rows(sample_statistics: pd.DataFrame, limit: int = 20) -> pd.DataFram
     return data.sort_values("cv", ascending=False).head(limit).copy()
 
 
+def compiler_pair_metric_summary(metric_comparisons: pd.DataFrame) -> pd.DataFrame:
+    group_columns = [
+        "baseline_compiler_version",
+        "candidate_compiler_version",
+        "metric",
+        "metric_display_name",
+    ]
+    output_columns = [
+        "compiler_pair",
+        *group_columns,
+        "row_count",
+        "changed_count",
+        "stable_count",
+        "regression_count",
+        "improvement_count",
+        "candidate_change_count",
+        "reliable_change_count",
+        "median_normalized_change_percent",
+        "mean_normalized_change_percent",
+    ]
+    if metric_comparisons.empty or not set(group_columns).issubset(metric_comparisons.columns):
+        return pd.DataFrame(columns=output_columns)
+
+    data = _comparison_rows_with_flags(metric_comparisons)
+    summary = _summarize_comparison_groups(data, group_columns)
+    return summary[output_columns].sort_values(["baseline_compiler_version", "candidate_compiler_version", "metric"])
+
+
+def compiler_pair_suite_metric_summary(metric_comparisons: pd.DataFrame) -> pd.DataFrame:
+    group_columns = [
+        "baseline_compiler_version",
+        "candidate_compiler_version",
+        "suite_name",
+        "metric",
+        "metric_display_name",
+    ]
+    output_columns = [
+        "compiler_pair",
+        *group_columns,
+        "row_count",
+        "changed_count",
+        "stable_count",
+        "regression_count",
+        "improvement_count",
+        "candidate_change_count",
+        "reliable_change_count",
+        "median_normalized_change_percent",
+        "mean_normalized_change_percent",
+    ]
+    if metric_comparisons.empty or not set(group_columns).issubset(metric_comparisons.columns):
+        return pd.DataFrame(columns=output_columns)
+
+    data = _comparison_rows_with_flags(metric_comparisons)
+    summary = _summarize_comparison_groups(data, group_columns)
+    return summary[output_columns].sort_values(
+        ["baseline_compiler_version", "candidate_compiler_version", "suite_name", "metric"]
+    )
+
+
+def top_change_rows_with_context(
+    top_regressions: pd.DataFrame,
+    top_improvements: pd.DataFrame,
+    *,
+    limit_each: int = 10,
+) -> pd.DataFrame:
+    regressions = top_regressions.head(limit_each).copy()
+    improvements = top_improvements.head(limit_each).copy()
+    combined = pd.concat([improvements, regressions], ignore_index=True)
+    if combined.empty:
+        return combined
+
+    if "normalized_change_percent" in combined.columns:
+        combined["normalized_change_percent"] = pd.to_numeric(combined["normalized_change_percent"], errors="coerce")
+        combined = combined.sort_values("normalized_change_percent", ascending=True)
+
+    suite = combined.get("suite_name", pd.Series(["unknown"] * len(combined), index=combined.index)).astype(str)
+    metric = combined.get("metric", pd.Series(["metric"] * len(combined), index=combined.index)).astype(str)
+    test_names = combined.get("test_name", pd.Series(["unknown"] * len(combined), index=combined.index)).astype(str)
+    combined["suite_aware_label"] = [
+        f"{suite_name} | {metric_name} | {short_test_name(test_name, 68)}"
+        for suite_name, metric_name, test_name in zip(suite, metric, test_names, strict=False)
+    ]
+    return combined
+
+
+def noise_plot_rows(sample_statistics: pd.DataFrame, limit: int = 20) -> pd.DataFrame:
+    rows = top_cv_rows(sample_statistics, limit)
+    if rows.empty:
+        return rows
+
+    rows = rows.reset_index(drop=True)
+    rows["rank"] = rows.index + 1
+    rows["cv_percent"] = pd.to_numeric(rows["cv"], errors="coerce") * 100.0
+    rows["display_name"] = rows.apply(_sample_noise_label, axis=1)
+    return rows
+
+
+def short_test_name(value: str, limit: int = 64) -> str:
+    if len(value) <= limit:
+        return value
+    return "..." + value[-(limit - 3) :]
+
+
 def suite_metric_summary(metric_comparisons: pd.DataFrame) -> pd.DataFrame:
     columns = ["suite_name", "metric", "classification", "count"]
     if metric_comparisons.empty:
@@ -90,3 +193,45 @@ def suite_metric_summary(metric_comparisons: pd.DataFrame) -> pd.DataFrame:
         .sort_values(["suite_name", "metric", "classification"])
     )
 
+
+def _comparison_rows_with_flags(metric_comparisons: pd.DataFrame) -> pd.DataFrame:
+    data = metric_comparisons.copy()
+    data["normalized_change_percent"] = pd.to_numeric(data["normalized_change_percent"], errors="coerce")
+    data["classification"] = data["classification"].astype(str)
+    data["compiler_pair"] = (
+        data["baseline_compiler_version"].astype(str)
+        + " -> "
+        + data["candidate_compiler_version"].astype(str)
+    )
+    data["is_stable"] = data["classification"].eq("stable")
+    data["is_regression"] = data["classification"].str.endswith("regression", na=False)
+    data["is_improvement"] = data["classification"].str.endswith("improvement", na=False)
+    data["is_candidate_change"] = data["classification"].str.startswith("candidate_", na=False)
+    data["is_reliable_change"] = data["classification"].str.startswith("reliable_", na=False)
+    data["is_changed"] = ~data["is_stable"]
+    return data
+
+
+def _summarize_comparison_groups(data: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
+    grouped = data.groupby(group_columns, dropna=False)
+    summary = grouped.agg(
+        compiler_pair=("compiler_pair", "first"),
+        row_count=("classification", "size"),
+        changed_count=("is_changed", "sum"),
+        stable_count=("is_stable", "sum"),
+        regression_count=("is_regression", "sum"),
+        improvement_count=("is_improvement", "sum"),
+        candidate_change_count=("is_candidate_change", "sum"),
+        reliable_change_count=("is_reliable_change", "sum"),
+        median_normalized_change_percent=("normalized_change_percent", "median"),
+        mean_normalized_change_percent=("normalized_change_percent", "mean"),
+    )
+    return summary.reset_index()
+
+
+def _sample_noise_label(row: pd.Series) -> str:
+    compiler = str(row.get("compiler_version", "unknown"))
+    suite = str(row.get("suite_name", "suite"))
+    metric = str(row.get("metric", "metric"))
+    test_name = short_test_name(str(row.get("test_name", "unknown")), 64)
+    return f"{compiler} | {suite} | {metric} | {test_name}"
