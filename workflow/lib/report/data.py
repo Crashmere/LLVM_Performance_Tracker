@@ -157,9 +157,25 @@ def top_change_rows_with_context(
     suite = combined.get("suite_name", pd.Series(["unknown"] * len(combined), index=combined.index)).astype(str)
     metric = combined.get("metric", pd.Series(["metric"] * len(combined), index=combined.index)).astype(str)
     test_names = combined.get("test_name", pd.Series(["unknown"] * len(combined), index=combined.index)).astype(str)
+    baseline_versions = combined.get(
+        "baseline_compiler_version",
+        pd.Series(["unknown"] * len(combined), index=combined.index),
+    ).astype(str)
+    candidate_versions = combined.get(
+        "candidate_compiler_version",
+        pd.Series(["unknown"] * len(combined), index=combined.index),
+    ).astype(str)
+    combined["plot_position"] = range(len(combined))
     combined["suite_aware_label"] = [
-        f"{suite_name} | {metric_name} | {short_test_name(test_name, 68)}"
-        for suite_name, metric_name, test_name in zip(suite, metric, test_names, strict=False)
+        f"{suite_name} | {metric_name} | {_short_compiler_pair(baseline, candidate)} | {short_test_name(test_name, 58)}"
+        for suite_name, metric_name, baseline, candidate, test_name in zip(
+            suite,
+            metric,
+            baseline_versions,
+            candidate_versions,
+            test_names,
+            strict=False,
+        )
     ]
     return combined
 
@@ -180,6 +196,17 @@ def short_test_name(value: str, limit: int = 64) -> str:
     if len(value) <= limit:
         return value
     return "..." + value[-(limit - 3) :]
+
+
+def _short_compiler_pair(baseline: str, candidate: str) -> str:
+    return f"{_short_compiler_version(baseline)} -> {_short_compiler_version(candidate)}"
+
+
+def _short_compiler_version(value: str) -> str:
+    for prefix in ("llvmorg-", "llvm-"):
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+    return value
 
 
 def suite_metric_summary(metric_comparisons: pd.DataFrame) -> pd.DataFrame:

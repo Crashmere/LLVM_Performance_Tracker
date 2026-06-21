@@ -106,11 +106,12 @@ def _top_change_figure(data: AnalysisReportData) -> go.Figure:
     fig = go.Figure(
         go.Bar(
             x=combined["normalized_change_percent"],
-            y=combined["suite_aware_label"],
+            y=combined["plot_position"],
             orientation="h",
             marker_color=colors,
             customdata=combined[
                 [
+                    "suite_aware_label",
                     "suite_name",
                     "test_name",
                     "metric",
@@ -124,18 +125,25 @@ def _top_change_figure(data: AnalysisReportData) -> go.Figure:
                 ]
             ],
             hovertemplate=(
-                "suite=%{customdata[0]}<br>"
-                "test=%{customdata[1]}<br>"
-                "metric=%{customdata[2]} (%{customdata[3]})<br>"
+                "%{customdata[0]}<br>"
+                "suite=%{customdata[1]}<br>"
+                "test=%{customdata[2]}<br>"
+                "metric=%{customdata[3]} (%{customdata[4]})<br>"
                 "normalized change=%{x:+.2f}%<br>"
-                "LLVM %{customdata[4]} -> %{customdata[5]}<br>"
-                "suite version %{customdata[6]} -> %{customdata[7]}<br>"
-                "%{customdata[8]} / %{customdata[9]}<extra></extra>"
+                "LLVM %{customdata[5]} -> %{customdata[6]}<br>"
+                "suite version %{customdata[7]} -> %{customdata[8]}<br>"
+                "%{customdata[9]} / %{customdata[10]}<extra></extra>"
             ),
         )
     )
-    fig.update_layout(template="plotly_white", height=620, margin=dict(l=220, r=40, t=30, b=50))
+    fig.update_layout(template="plotly_white", height=660, margin=dict(l=300, r=40, t=30, b=50))
     fig.update_xaxes(title_text="Normalized change (%; positive is improvement)")
+    fig.update_yaxes(
+        autorange="reversed",
+        tickmode="array",
+        tickvals=combined["plot_position"],
+        ticktext=combined["suite_aware_label"],
+    )
     fig.add_vline(x=0, line_width=1, line_color="rgba(96, 113, 128, 0.65)")
     return fig
 
