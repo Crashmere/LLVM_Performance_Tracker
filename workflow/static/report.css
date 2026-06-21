@@ -47,14 +47,41 @@ main { width: min(1520px, calc(100% - 48px)); margin: 0 auto; padding: 36px 0 56
   top: 12px;
   z-index: 5;
 }
+.nav-indicator {
+  background: #213b33;
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(31, 43, 37, 0.18);
+  height: 36px;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 10px;
+  transform: translateX(0);
+  transition:
+    transform 180ms ease,
+    width 180ms ease,
+    opacity 120ms ease;
+  width: 0;
+  z-index: 0;
+}
 .report-nav a {
   border-radius: 999px;
   color: var(--ink);
   padding: 8px 14px;
+  position: relative;
   text-decoration: none;
+  transition: color 160ms ease;
+  z-index: 1;
 }
 .report-nav a:hover {
   background: #eadfca;
+}
+.report-nav a.is-active {
+  color: #fffaf0;
+}
+.report-nav a.is-active:hover {
+  background: transparent;
 }
 .eyebrow {
   color: var(--gold);
@@ -167,6 +194,36 @@ code { background: #efe5d2; border-radius: 6px; padding: 2px 6px; }
   gap: 22px;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
 }
+#top-changes .split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 30px;
+}
+#top-changes .split > div {
+  min-width: 0;
+}
+#top-changes .table-controls {
+  align-items: end;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+#top-changes .table-search {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+}
+#top-changes .filter-label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+#top-changes .filter-label select {
+  min-width: 0;
+  width: 100%;
+}
+#top-changes .table-count {
+  padding-bottom: 9px;
+  white-space: nowrap;
+}
 .suite-grid {
   display: grid;
   gap: 18px;
@@ -237,6 +294,14 @@ code { background: #efe5d2; border-radius: 6px; padding: 2px 6px; }
     overflow-x: auto;
     position: static;
   }
+  .nav-indicator { display: none; }
+  .report-nav a.is-active {
+    background: #213b33;
+    color: #fffaf0;
+  }
   .split { grid-template-columns: 1fr; }
+  #top-changes .split { grid-template-columns: 1fr; }
+  #top-changes .table-controls { grid-template-columns: 1fr; }
+  #top-changes .table-count { padding-bottom: 0; }
   .suite-card .mini-cards { grid-template-columns: 1fr; }
 }

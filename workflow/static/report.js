@@ -29,6 +29,82 @@ document.addEventListener("input", (event) => {
   if (tableId) applyTableFilters(tableId);
 });
 
+function setupNavScrollSpy() {
+  const nav = document.querySelector(".report-nav");
+  if (!nav) return;
+
+  const links = Array.from(nav.querySelectorAll('a[href^="#"]'));
+  const indicator = nav.querySelector(".nav-indicator");
+  const sections = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  if (!links.length || !sections.length) return;
+
+  let activeLink = null;
+  let ticking = false;
+
+  function sectionActivationLine() {
+    const navBottom = nav.getBoundingClientRect().bottom;
+    return navBottom + 32;
+  }
+
+  function currentSection() {
+    const activationLine = sectionActivationLine();
+    let current = sections[0];
+
+    for (const section of sections) {
+      const top = section.getBoundingClientRect().top;
+      if (top <= activationLine) {
+        current = section;
+      } else {
+        break;
+      }
+    }
+    return current;
+  }
+
+  function moveIndicator(link) {
+    if (!indicator || !link) return;
+    const navRect = nav.getBoundingClientRect();
+    const linkRect = link.getBoundingClientRect();
+    const left = linkRect.left - navRect.left + nav.scrollLeft;
+    indicator.style.width = `${linkRect.width}px`;
+    indicator.style.transform = `translateX(${left}px)`;
+    indicator.style.opacity = "1";
+  }
+
+  function setActive(section) {
+    const nextLink = links.find((link) => link.getAttribute("href") === `#${section.id}`);
+    if (!nextLink || nextLink === activeLink) {
+      moveIndicator(activeLink || nextLink);
+      return;
+    }
+
+    for (const link of links) {
+      link.classList.toggle("is-active", link === nextLink);
+    }
+    activeLink = nextLink;
+    moveIndicator(activeLink);
+  }
+
+  function update() {
+    ticking = false;
+    setActive(currentSection());
+  }
+
+  function requestUpdate() {
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(update);
+  }
+
+  nav.addEventListener("scroll", requestUpdate, { passive: true });
+  window.addEventListener("scroll", requestUpdate, { passive: true });
+  window.addEventListener("resize", requestUpdate);
+  window.addEventListener("load", requestUpdate);
+  requestUpdate();
+}
+
 function showSuiteDrilldown(compilerPair, options = {}) {
   const panels = Array.from(document.querySelectorAll("[data-suite-drilldown]"));
   const selector = document.querySelector("[data-suite-drilldown-select]");
@@ -79,4 +155,5 @@ function setupSuiteDrilldown() {
   });
 }
 
+setupNavScrollSpy();
 setupSuiteDrilldown();

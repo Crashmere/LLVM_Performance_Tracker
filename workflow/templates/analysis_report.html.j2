@@ -33,6 +33,7 @@
     </section>
 
     <nav class="report-nav" aria-label="Report sections">
+      <span class="nav-indicator" aria-hidden="true"></span>
       {% for item in nav_items %}
       <a href="{{ item.href }}">{{ item.label }}</a>
       {% endfor %}
