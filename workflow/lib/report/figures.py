@@ -34,13 +34,13 @@ def build_figures(data: AnalysisReportData) -> list[FigureSpec]:
         FigureSpec(
             "compiler_pair_matrix",
             "LLVM Version Pair Trend Matrix",
-            "Color shows median normalized change: green is improvement, red is regression. Cell text shows changed row count.",
+            "Color and cell text show median normalized change: green is improvement, red is regression. Hover shows changed row count.",
             _compiler_pair_trend_heatmap(data),
         ),
         FigureSpec(
             "suite_metric_matrix",
             "Suite Contribution By LLVM Version Pair",
-            "For each LLVM version pair and suite, color shows median normalized change and text shows changed row count.",
+            "For each LLVM version pair and suite, color and cell text show median normalized change. Hover shows changed row count.",
             _suite_contribution_heatmap(data),
         ),
         FigureSpec(
@@ -181,6 +181,7 @@ def _compiler_pair_trend_heatmap(data: AnalysisReportData) -> go.Figure:
         aggfunc="first",
     )
     text, customdata = _heatmap_text_and_customdata(summary, list(pivot.index), list(pivot.columns), include_suite=False)
+    zmin, zmax = _symmetric_color_bounds(pivot.values)
     fig = go.Figure(
         go.Heatmap(
             z=pivot.values,
@@ -191,6 +192,8 @@ def _compiler_pair_trend_heatmap(data: AnalysisReportData) -> go.Figure:
             customdata=customdata,
             colorscale=_trend_colorscale(),
             zmid=0,
+            zmin=zmin,
+            zmax=zmax,
             colorbar=dict(title="Median<br>change %"),
             hovertemplate=(
                 "LLVM pair=%{y}<br>"
@@ -227,6 +230,7 @@ def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
         include_suite=True,
         row_key="compiler_pair_suite",
     )
+    zmin, zmax = _symmetric_color_bounds(pivot.values)
     height = max(380, min(820, 220 + len(pivot.index) * 44))
     fig = go.Figure(
         go.Heatmap(
@@ -238,6 +242,8 @@ def _suite_contribution_heatmap(data: AnalysisReportData) -> go.Figure:
             customdata=customdata,
             colorscale=_trend_colorscale(),
             zmid=0,
+            zmin=zmin,
+            zmax=zmax,
             colorbar=dict(title="Median<br>change %"),
             hovertemplate=(
                 "LLVM pair=%{customdata[8]}<br>"
@@ -276,7 +282,7 @@ def _heatmap_text_and_customdata(
                 custom_row.append([0.0, 0, 0, 0, 0, 0, 0, 0, "", ""])
                 continue
             changed_count = int(record.get("changed_count", 0))
-            text_row.append(str(changed_count) if changed_count else "")
+            text_row.append(_heatmap_cell_text(record.get("median_normalized_change_percent")))
             custom_row.append(
                 [
                     float(record.get("mean_normalized_change_percent", 0) or 0),
@@ -294,6 +300,35 @@ def _heatmap_text_and_customdata(
         text_grid.append(text_row)
         custom_grid.append(custom_row)
     return text_grid, custom_grid
+
+
+def _heatmap_cell_text(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return f"{float(value):+.2f}%"
+
+
+def _symmetric_color_bounds(values: object) -> tuple[float, float]:
+    if hasattr(values, "ravel"):
+        flat_values = values.ravel()
+    else:
+        flat_values = []
+        for row in values:
+            if isinstance(row, (list, tuple)):
+                flat_values.extend(row)
+            else:
+                flat_values.append(row)
+
+    numeric = pd.Series(flat_values)
+    numeric = pd.to_numeric(numeric, errors="coerce").dropna().abs()
+    if numeric.empty:
+        return -1.0, 1.0
+
+    robust_max = float(numeric.quantile(0.95))
+    absolute_max = float(numeric.max())
+    bound = min(absolute_max, robust_max) if robust_max > 0 else absolute_max
+    bound = max(bound, 0.01)
+    return -bound, bound
 
 
 def _trend_colorscale() -> list[list[object]]:
