@@ -1,0 +1,32 @@
+* text=auto
+
+# Keep source and project text files on LF across platforms.
+.gitattributes text eol=lf
+*.c text eol=lf
+*.cc text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.j2 text eol=lf
+Snakefile text eol=lf
+
+# Do not treat binary assets as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
