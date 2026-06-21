@@ -1267,12 +1267,17 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 5. 优化 `Noisiest Sample Groups`。
    - 当前问题：CV 值可能非常接近，普通 bar chart 不容易看出差异。
+   - 已观察到一类特殊情况：Official test-suite 的极短程序可能在 raw `baseline_results.json` 中直接出现 `exec_time = 0.0`。底层原因通常不是 parser 或 analysis 精度不足，而是 LLVM test-suite 从 `.time` 文件提取 `user` time 作为 `exec_time`，当程序过短时 user time 可能被记录为 `0.0000`。
    - 改造方向：
      - hover 中增加更高精度，例如 CV 显示 6 位有效数字或百分比显示 4 位小数。
      - x 轴可使用局部缩放范围，而不是从 0 开始，让非常接近的 top values 更容易区分。
      - 考虑改为 dot plot / lollipop chart，而不是普通横向 bar。
      - 增加 rank、cv、observations、std、mean 的表格或 inline text，承认这些值可能很接近。
      - 只在差异足够明显时强调排名；否则文案应说明“这些 top noisy groups 的 CV 非常接近”。
+   - 未来可选任务：
+     - 在 analysis 或 report 层识别 `exec_time` 中混合出现零值和极小非零值的 sample group。
+     - 增加 `has_zero_observations`、`zero_observation_count` 或 `timing_floor_limited` 之类的诊断字段。
+     - 在 report 中把这类结果标记为低可信度 timing-resolution artifact，避免用户把 `[0, 0, x]` 导致的高 CV 误读为真实性能波动。
    - 用户价值：
      - 避免用户误以为图表显示错误。
      - 让 noise section 更像诊断工具，而不是单纯排行榜。
