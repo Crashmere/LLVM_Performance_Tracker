@@ -1452,54 +1452,168 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ---
 
-## 阶段 9：自动版本监控与持续执行
+## 阶段 9：最小 LLVM 版本监控与自动触发
 
 ### 目标
 
-覆盖报告中的可选任务 2.2，为长期趋势跟踪提供自动入口。
+覆盖报告中的可选任务 2.2，但只实现最小可展示、低复杂度的自动版本监控能力。
+
+本阶段的核心目标是：
+
+```text
+发现新的 LLVM release tag
+  -> 用该 tag 覆盖本次运行的 LLVM 版本
+  -> 触发现有 Snakemake workflow
+  -> 继续复用已有 checkout/build/run/parse/analyze/report 主线
+```
+
+阶段九不再扩展复杂 CI/CD、通知系统或调度框架。项目主体已经完成，本阶段只作为 optional task 证明系统可以被自动版本监控逻辑驱动。
 
 ### 当前差距
 
-- 尚无自动检测 LLVM 新版本的机制。
-- 尚无定时触发工作流的入口。
-- 尚无自动摘要通知。
+- `run.sh` 目前只能使用 `config.yml` 中的 LLVM tag 列表。
+- 如果 `config.yml` 中保留多个旧 LLVM 版本，无法在一次运行中临时指定“只跑某一个新版本”。
+- 尚无脚本检查 LLVM 官方仓库是否发布了新的 release tag。
+- 尚无最小状态文件记录“哪些 tag 已经被自动触发过”。
 
 ### 需要完成的功能
 
-- 周期性检测 LLVM 新 tag 或 commit。
-- 检测到新版本后自动生成实验任务。
-- 自动产出摘要。
+1. `run.sh` 支持运行时指定 LLVM tag。
+   - 建议参数名：
+     - `./run.sh --llvm-tag llvmorg-22.0.0`
+     - 或短参数 `./run.sh -L llvmorg-22.0.0`
+   - 指定后，本次运行只测试该 LLVM tag。
+   - 该覆盖应忽略 `config.yml` 中 `llvm.tags` 的全部配置。
+   - 即使 `config.yml` 中配置了多个旧 LLVM tag，本次 DAG 也只展开命令行传入的那个 tag。
+   - Official test-suite tag、RAJA tag、samples、label、test_selection 等仍来自 `config.yml`。
+
+2. 配置归一化层支持 LLVM tag override。
+   - 当前 `Snakefile` 通过 `configfile` 读取 `config.yml`，并调用 `normalize_workflow_config(config)`。
+   - 因此只在 `run.sh` 中拼接 Snakemake 参数是不够的；需要让 `Snakefile` / 配置归一化层能接收并应用 override。
+   - 建议实现方式：
+     - `run.sh --llvm-tag <tag>` 传递 Snakemake config override，例如 `--config llvm_tag_override=<tag>`。
+     - `workflow/Snakefile` 将该 override 传入 `normalize_workflow_config()`。
+     - `normalize_workflow_config()` 在 simple mode 和 explicit mode 展开前统一覆盖 LLVM tag。
+   - explicit mode 下的行为也应明确：
+     - 如果传入 override，则忽略每个 explicit experiment 中原有的 `llvm_tag`，只替换 LLVM tag。
+     - 其它字段如 `official_tag`、`raja_tag`、sample、label 保持原配置。
+
+3. 新增最小 LLVM tag 检查脚本。
+   - 脚本只负责关键逻辑，不负责安装 cron 或配置系统服务。
+   - 建议新增：
+     - `tools/check_llvm_releases.py`
+   - 职责：
+     - 查询 LLVM 官方仓库 tags。
+     - 从 tags 中筛选符合 `llvmorg-X.Y.Z` 的 release tag。
+     - 找出最新 tag 或所有未见过的新 tag。
+     - 与本地状态文件比较，判断是否需要触发 workflow。
+     - 如果发现新 tag，则调用 `./run.sh --llvm-tag <tag>`。
+   - 状态文件建议放在 `auto/monitor/` 下，例如：
+     - `auto/monitor/seen_llvm_tags.txt`
+     - `auto/monitor/last_triggered.json`
+   - 这样状态属于运行产物，不进入 git。
+
+4. 提供 cron 使用示例，但不实现完整 cron 框架。
+   - 新增文档或脚本注释，说明可以用 cron 定期运行：
+     - `python tools/check_llvm_releases.py --config-file config.yml --run`
+   - 不要求项目自动安装 crontab。
+   - 不引入 systemd timer、GitHub Actions、GitLab CI 或邮件通知。
+   - 第一版只需要能够手动运行该脚本，模拟 cron 触发即可。
+
+5. 监控脚本应有 dry-run 模式。
+   - 默认只检查并打印结果，不触发 workflow。
+   - 只有显式传入 `--run` 时才调用 `run.sh`。
+   - 这样便于展示和调试，避免意外启动长时间 benchmark。
 
 ### 需要修改/新增的代码或文件
 
+- `run.sh`
+  - 新增 `--llvm-tag` / `-L` 参数解析。
+  - 将 override 透传给 Snakemake。
+
+- `workflow/Snakefile`
+  - 读取 Snakemake config override，并传给配置归一化层。
+
+- `workflow/lib/common.py`
+  - `normalize_workflow_config()` 增加可选 LLVM tag override。
+  - 在 simple / explicit 两种模式下统一应用。
+
 - 新增：
-  - `workflow/scripts/check_new_llvm_versions.py`
-  - `.gitlab-ci.yml` 或 `ci/` 目录
-  - `cron/` 示例脚本
+  - `tools/check_llvm_releases.py`
+  - 可选：`docs/monitoring.md`
 
 ### 具体修改内容
 
-1. 版本检测脚本：
-   - 查询远程 tags
-   - 与本地已跑版本比对
-   - 输出待跑列表
+1. 增加运行时 LLVM tag override。
+   - 示例：
 
-2. 自动生成实验配置：
-   - 可生成新的全局 `label`
-   - 指定 baseline 比较版本
+```bash
+./run.sh --llvm-tag llvmorg-22.0.0
+./run.sh dry-run --llvm-tag llvmorg-22.0.0
+./run.sh strict --llvm-tag llvmorg-22.0.0
+```
 
-3. CI/CRON 任务：
-   - 定时检测
-   - 触发 Snakemake
-   - 保存 logs 与 reports
+   - `dry-run`、`strict`、`resume` 等现有模式应继续可用。
+   - `report`、`inspect`、`disk` 这类不运行 Snakemake DAG 的子命令不需要支持 `--llvm-tag`。
 
-4. 自动摘要输出：
-   - 新版本是否成功构建
-   - 有无显著 regression
+2. 明确 override 后的 experiment 语义。
+   - simple mode：
+     - `llvm.tags` 被替换为 `[override_tag]`。
+     - Official / RAJA tag 矩阵仍按 config 展开。
+   - explicit mode：
+     - 每个 experiment 的 `llvm_tag` 被替换为 override tag。
+     - 如果多个 explicit experiments 因替换后变成重复组合，应由已有重复校验报错。
+   - label：
+     - 仍按当前规则使用 config 中的 `label` 或自动时间戳。
+     - 监控脚本不额外生成 label，避免引入第二套命名逻辑。
+
+3. 实现 tag 查询逻辑。
+   - 使用 `git ls-remote --tags <llvm_repo_url>` 查询远程 tag。
+   - 从 `refs/tags/llvmorg-X.Y.Z` 中提取版本。
+   - 排除带 `^{}` 的 annotated tag dereference。
+   - 只处理稳定 release tag，不处理任意 commit。
+   - 版本排序按数字语义处理，而不是简单字符串排序。
+
+4. 实现监控状态逻辑。
+   - 读取 `auto/monitor/seen_llvm_tags.txt`。
+   - 如果不存在，可将当前 latest tag 记录为 seen，但默认不触发历史版本运行。
+   - 如果发现 newer tag：
+     - dry-run：打印将要触发的 tag。
+     - `--run`：调用 `./run.sh --llvm-tag <tag>`。
+   - 成功触发后更新 seen 状态。
+   - 如果 workflow 失败，不应把该 tag 标记为完成；否则下次无法重试。
+
+5. 文档化 cron 示例。
+   - 示例只说明如何调用：
+
+```cron
+0 3 * * * cd /path/to/project && .venv/bin/python tools/check_llvm_releases.py --config-file config.yml --run >> auto/monitor/cron.log 2>&1
+```
+
+   - 说明这个 cron 行只是示例，用户需要根据实际环境、虚拟环境路径和资源策略调整。
+   - 不把 cron 安装变成项目脚本职责。
+
+### 暂不进入本阶段的内容
+
+- 不做 GitHub Actions / GitLab CI 集成。
+- 不做邮件、Slack 或 webhook 通知。
+- 不做自动清理旧结果。
+- 不做复杂 baseline/candidate 选择策略。
+- 不做自动修改 `config.yml`。
+- 不做自动检测 RAJA 或 Official test-suite 新版本。
+- 不做按 commit 级别监控，只监控 LLVM release tag。
+- 不为 cron 封装完整框架，只提供核心脚本和示例。
 
 ### 验收标准
 
-- 在不手工编辑配置的前提下，系统可以发现并触发新版本实验。
+- 用户可以运行 `./run.sh --llvm-tag <tag>`，在不修改 `config.yml` 的前提下只测试该 LLVM tag。
+- `./run.sh dry-run --llvm-tag <tag>` 展开的 DAG 中只出现该 LLVM tag。
+- `config.yml` 中即使配置多个 LLVM tag，命令行 override 也能使本次运行只使用一个 tag。
+- 监控脚本可以查询 LLVM 官方 tags，并识别 latest release tag。
+- 监控脚本 dry-run 时只打印将要触发的 tag，不运行 workflow。
+- 监控脚本 `--run` 时可以调用 `./run.sh --llvm-tag <tag>`。
+- 监控状态文件可以避免重复触发同一个已成功处理的 tag。
+- 阶段九不引入 CI、通知或复杂调度系统。
 
 ---
 
