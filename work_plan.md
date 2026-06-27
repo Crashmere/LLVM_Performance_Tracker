@@ -1392,55 +1392,63 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ---
 
-## 阶段 8：平台抽象与 HPC 可移植性支持
+## 阶段 8：ARCHER2 迁移验证与 HPC 可移植性确认
 
 ### 目标
 
-为 EIDF VM 与 ARCHER2 验证做准备，避免平台差异硬编码在脚本里。
+验证当前 Snakemake/Python 工作流能否迁移到 ARCHER2 环境运行，并确认是否需要为了 HPC 环境引入新的平台抽象层。
 
-### 当前差距
+### 当前状态
 
-- 当前工作流默认面向单机 Linux 环境。
-- 没有平台 profile、module load 层、调度系统适配说明。
-- 对不同平台的编译器、Python、Snakemake profile 缺少抽象。
+阶段 8 已完成。实际迁移过程中没有修改系统代码，主要工作是处理 ARCHER2 环境中的依赖安装和版本匹配问题。
 
-### 需要完成的功能
+这个结果说明当前主线设计具有基本可移植性：
 
-- 引入平台配置层。
-- 区分本地/EIDF/ARCHER2 的路径、编译器和运行方式。
-- 为 HPC 环境增加 profile 和文档。
+- 工作流入口仍然是 `run.sh` / Snakemake。
+- `config.yml` 中已有的路径、编译器和并行度配置足以支持一次手动迁移验证。
+- checkout / build / run / parse / analyze / report 主线不依赖 EIDF 专有代码。
+- 平台差异主要体现在 Python 包、Snakemake、lit、pandas、Plotly、Jinja2、CMake/Ninja、编译器和系统模块等环境依赖上。
 
-### 需要修改/新增的代码或文件
+### 实际完成内容
 
-- `config.yml`
-- `workflow/lib/common.py`
-- 新增：
-  - `profiles/eidf/`
-  - `profiles/archer2/`
-  - `env/` 或 `scripts/platform/`
-  - `docs/platforms.md`
+- 将系统迁移到 ARCHER2 环境。
+- 解决环境依赖版本问题。
+- 成功运行当前 workflow 并完成数据收集。
+- 确认不需要为了阶段八修改 `workflow/`、`run.sh` 或 `config.yml` 的结构。
+- 确认现阶段不需要引入独立 platform profile、module command 配置层或 scheduler adapter。
 
-### 具体修改内容
+### 设计结论
 
-1. 增加平台配置字段：
-   - `platform.name`
-   - `platform.module_commands`
-   - `platform.env`
-   - `platform.snakemake_profile`
+1. 暂不实现平台抽象层。
+   - 原计划中的 `platform.name`、`platform.module_commands`、`platform.env`、`platform.snakemake_profile` 暂不进入主线。
+   - 当前项目阶段下，强行引入这些字段会增加配置复杂度，但收益有限。
 
-2. 对运行命令增加环境注入能力。
+2. 暂不新增 `profiles/eidf/` 或 `profiles/archer2/`。
+   - 当前已有 `run.sh` 和 Snakemake 命令足以完成手动迁移验证。
+   - 如果未来需要长期在 ARCHER2 批量运行，再补 Snakemake profile 和作业脚本模板。
 
-3. 针对 ARCHER2 准备：
-   - 作业脚本模板
-   - profile 示例
-   - 并行度与资源请求说明
+3. 把平台问题优先视为环境安装问题。
+   - 后续文档应重点记录依赖安装、版本匹配和验证命令。
+   - 不把 module load、scheduler 参数和 Python 包版本硬编码进 workflow 代码。
 
-4. 在结果元数据中写入平台信息，防止不同机器结果混淆。
+4. 平台 provenance 可以留作后续增强。
+   - 目前 metadata 已记录 hostname、kernel、Python version、Snakemake version 等轻量环境信息。
+   - 如果后续需要严谨比较跨平台结果，再增加更明确的平台字段。
 
 ### 验收标准
 
-- 本地/EIDF/ARCHER2 至少有清晰的配置模板。
-- 平台切换主要通过配置完成，而不是修改 Python 代码。
+- ARCHER2 环境中可以安装依赖并运行 workflow。
+- 系统代码不需要针对 ARCHER2 做专门分支。
+- 阶段八不引入新的平台配置复杂度。
+- 后续平台支持需求明确后，再单独补充 profile、job script 或 `docs/platforms.md`。
+
+### 后续可选任务
+
+- 编写 `docs/platforms.md`，记录 EIDF 与 ARCHER2 的环境准备步骤。
+- 提供 ARCHER2 作业脚本模板。
+- 增加 Snakemake profile 示例。
+- 在 metadata 中增加更明确的平台标识、module 列表或关键依赖版本。
+- 如果需要跨平台比较性能，再定义哪些指标可比较、哪些只用于平台内趋势分析。
 
 ---
 

@@ -1521,3 +1521,63 @@ Turn the version-pair matrix into a directional trend view, add suite drilldown 
 - I improved the top regression/improvement chart by adding suite context and preventing repeated test labels from being visually merged.
 - I improved the sample stability section with clearer CV precision and documented that raw zero `exec_time` values can be timing-resolution artifacts for very short Official tests.
 - I cleaned up the report layout, table controls, navigation slider, and click/scroll behavior while keeping the report as a self-contained static HTML file.
+
+### 阶段八：ARCHER2 迁移验证
+
+阶段八原本计划引入平台配置层、Snakemake profile 和 HPC 作业脚本模板。但实际迁移过程中发现，当前系统已经可以迁移到 ARCHER2 环境并成功运行，主要问题集中在环境依赖安装和版本匹配，而不是 workflow 代码结构。
+
+因此这一阶段没有对 `workflow/`、`run.sh` 或 `config.yml` 做功能性修改。阶段八的结论是：当前 Snakemake/Python 主线具备基本可移植性，暂时不需要为了 ARCHER2 强行引入平台抽象层。
+
+#### 实际完成内容
+
+- 已将当前系统迁移到 ARCHER2 环境。
+- 已在 ARCHER2 上完成依赖准备和运行验证。
+- 已确认数据可以成功收集。
+- 已确认系统代码不需要针对 ARCHER2 做专门修改。
+- 已确认迁移中的主要问题是环境依赖版本，例如 Python 包、Snakemake、lit、pandas、Plotly、Jinja2、CMake/Ninja、编译器和系统模块等。
+
+#### 设计结论
+
+- 不新增 `platform.name`、`platform.module_commands`、`platform.env` 或 `platform.snakemake_profile` 等配置字段。
+- 不新增 `profiles/eidf/`、`profiles/archer2/` 或 scheduler adapter。
+- 不把 module load、作业调度参数或平台专用命令硬编码进 workflow。
+- 平台差异现阶段通过环境安装说明和配置文件手动调整解决。
+- 如果未来需要长期在 ARCHER2 上批量运行，再补充 Snakemake profile、作业脚本模板和更完整的平台文档。
+
+#### 对现有系统的影响
+
+- 主入口仍然是：
+
+```bash
+./run.sh
+```
+
+- 只重生成报告仍然是：
+
+```bash
+./run.sh report
+```
+
+- ARCHER2 迁移不会改变 parse / analyze / report 的数据流。
+- `auto/analysis/` 和 `auto/reports/analysis_report.html` 的生成方式保持不变。
+
+#### 后续可选增强
+
+- 增加 `docs/platforms.md`，记录 EIDF 与 ARCHER2 的依赖安装步骤和推荐版本。
+- 提供 ARCHER2 batch job script 示例。
+- 提供 Snakemake profile 示例。
+- 在 metadata 中记录更完整的平台 provenance，例如 module 列表、关键依赖版本、调度节点信息。
+- 如果未来要比较不同平台上的性能结果，需要单独定义跨平台比较边界；当前系统更适合比较同一平台内不同 LLVM 版本的性能变化。
+
+#### Commit Message
+
+Document ARCHER2 migration validation.
+Record that the workflow migrated to ARCHER2 without code changes, keep platform abstraction as optional future work, and clarify that current portability issues are environment dependency concerns.
+
+#### Weekly Update
+
+- This week I validated the workflow on ARCHER2.
+- The migration did not require changes to the Snakemake workflow or Python source code.
+- The main issues were dependency installation and version compatibility rather than platform-specific workflow logic.
+- I kept the platform abstraction work out of the main code path for now, since the existing configuration and run model were sufficient for migration validation.
+- Future ARCHER2 support can focus on documentation, job script examples, and optional Snakemake profiles if repeated HPC execution becomes necessary.
