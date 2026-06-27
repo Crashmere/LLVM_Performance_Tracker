@@ -57,6 +57,17 @@ def _normalize_label(value: Any) -> str:
     return str(value)
 
 
+def _normalize_optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        raise TypeError(f"{field_name} must be a single string, not a list.")
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{field_name} must not be empty.")
+    return text
+
+
 def _parse_bool(value: Any, field_name: str) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{field_name} must be a boolean, got {type(value).__name__}.")
@@ -169,6 +180,15 @@ def _normalize_explicit_experiments(
     return experiments
 
 
+def _apply_llvm_tag_override(
+    raw_experiments: list[dict[str, Any]],
+    llvm_tag_override: str | None,
+) -> list[dict[str, Any]]:
+    if llvm_tag_override is None:
+        return raw_experiments
+    return [{**experiment, "llvm_tag": llvm_tag_override} for experiment in raw_experiments]
+
+
 def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     experiments: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -212,7 +232,11 @@ def _finalize_experiments(raw_experiments: list[dict[str, Any]]) -> list[dict[st
     return experiments
 
 
-def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
+def normalize_workflow_config(
+    config: dict[str, Any],
+    *,
+    llvm_tag_override: Any = None,
+) -> dict[str, Any]:
     project = config["project"]
     build = config["build"]
     repositories = config["repositories"]
@@ -220,6 +244,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
     suite_defaults = config["suite_defaults"]
     test_selection = normalize_test_selection(config)
     raw_experiments = config.get("experiments", [])
+    normalized_llvm_tag_override = _normalize_optional_string(llvm_tag_override, "llvm_tag_override")
     label = _normalize_label(config.get("label"))
     samples = _normalize_samples(config)
     analysis = config.get("analysis", {})
@@ -238,7 +263,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
         official = test_suite["official"]
         raja = test_suite["raja"]
 
-        llvm_tags = _ensure_list(llvm["tags"])
+        llvm_tags = [normalized_llvm_tag_override] if normalized_llvm_tag_override else _ensure_list(llvm["tags"])
         official_tags = _ensure_list(official["tags"])
         raja_tags = _ensure_list(raja["tags"])
 
@@ -250,6 +275,10 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
             default_platform=default_platform,
             label=label,
             samples=samples,
+        )
+        normalized_raw_experiments = _apply_llvm_tag_override(
+            normalized_raw_experiments,
+            normalized_llvm_tag_override,
         )
         experiment_mode = "explicit"
     else:
@@ -263,6 +292,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
         experiment_mode = "simple"
 
     experiments = _finalize_experiments(normalized_raw_experiments)
+    resolved_llvm_tags = sorted({str(experiment["llvm_tag"]) for experiment in experiments})
 
     return {
         "project": {
@@ -288,7 +318,7 @@ def normalize_workflow_config(config: dict[str, Any]) -> dict[str, Any]:
         },
         "llvm": {
             "repo_url": repositories["llvm"],
-            "tags": llvm_tags,
+            "tags": resolved_llvm_tags,
             "build": {
                 "c_compiler": compilers["host"]["c"],
                 "cxx_compiler": compilers["host"]["cxx"],

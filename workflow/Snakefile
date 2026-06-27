@@ -18,7 +18,10 @@ from workflow.lib.common import normalize_workflow_config
 from workflow.lib.layout import get_experiment_layout_paths
 
 
-WORKFLOW_CONFIG = normalize_workflow_config(config)
+WORKFLOW_CONFIG = normalize_workflow_config(
+    config,
+    llvm_tag_override=config.get("llvm_tag_override"),
+)
 BASE_DIR = Path(WORKFLOW_CONFIG["project"]["base_dir"]).expanduser().resolve()
 EXPERIMENTS = WORKFLOW_CONFIG["experiments"]
 EXPERIMENTS_BY_ID = {experiment["experiment_id"]: experiment for experiment in EXPERIMENTS}
