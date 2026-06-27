@@ -1469,12 +1469,20 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 阶段九不再扩展复杂 CI/CD、通知系统或调度框架。项目主体已经完成，本阶段只作为 optional task 证明系统可以被自动版本监控逻辑驱动。
 
-### 当前差距
+### 当前状态
 
-- `run.sh` 目前只能使用 `config.yml` 中的 LLVM tag 列表。
-- 如果 `config.yml` 中保留多个旧 LLVM 版本，无法在一次运行中临时指定“只跑某一个新版本”。
-- 尚无脚本检查 LLVM 官方仓库是否发布了新的 release tag。
-- 尚无最小状态文件记录“哪些 tag 已经被自动触发过”。
+阶段九已完成最小实现。当前系统已经可以在不修改 `config.yml` 的前提下，通过命令行临时覆盖 LLVM tag，并提供一个独立监控脚本检查 LLVM 官方 release tag。
+
+已解决的问题包括：
+
+- `run.sh` 支持 `--llvm-tag <tag>` / `-L <tag>`，本次运行只展开指定 LLVM tag。
+- simple mode 和 explicit mode 都会统一应用 LLVM tag override。
+- 新增 `tools/check_llvm_releases.py`，可以查询 LLVM 官方仓库并识别最新 stable release tag。
+- 监控状态写入 `auto/monitor/`，不进入 git。
+- 默认 dry-run，不会写状态或启动 benchmark。
+- `--initialize` 可建立当前 latest tag 基线。
+- `--run` 可在发现新 latest tag 时调用 `./run.sh --llvm-tag <tag>`。
+- 新增 `docs/monitoring.md`，记录手动运行方式和 cron 示例。
 
 ### 需要完成的功能
 
@@ -1606,14 +1614,14 @@ Official 和 RAJA 都支持统一的 `excluded` 写法。Official 会转换为 l
 
 ### 验收标准
 
-- 用户可以运行 `./run.sh --llvm-tag <tag>`，在不修改 `config.yml` 的前提下只测试该 LLVM tag。
-- `./run.sh dry-run --llvm-tag <tag>` 展开的 DAG 中只出现该 LLVM tag。
-- `config.yml` 中即使配置多个 LLVM tag，命令行 override 也能使本次运行只使用一个 tag。
-- 监控脚本可以查询 LLVM 官方 tags，并识别 latest release tag。
-- 监控脚本 dry-run 时只打印将要触发的 tag，不运行 workflow。
-- 监控脚本 `--run` 时可以调用 `./run.sh --llvm-tag <tag>`。
-- 监控状态文件可以避免重复触发同一个已成功处理的 tag。
-- 阶段九不引入 CI、通知或复杂调度系统。
+- 已验证用户可以运行 `./run.sh --llvm-tag <tag>`，在不修改 `config.yml` 的前提下只测试该 LLVM tag。
+- 已验证 `./run.sh dry-run --llvm-tag <tag>` 展开的 DAG 中只出现该 LLVM tag。
+- 已验证 `config.yml` 中即使配置旧 LLVM tag，命令行 override 也能使本次运行只使用传入 tag。
+- 已验证监控脚本可以查询 LLVM 官方 tags，并识别 latest stable release tag。
+- 已验证监控脚本 dry-run 时只打印将要触发或初始化的 tag，不运行 workflow。
+- 已验证监控脚本 `--initialize` 会写入基线状态但不触发 workflow。
+- 已验证监控状态文件可以避免重复触发同一个已成功处理的 tag。
+- 阶段九未引入 CI、通知或复杂调度系统。
 
 ---
 

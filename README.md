@@ -1581,3 +1581,149 @@ Record that the workflow migrated to ARCHER2 without code changes, keep platform
 - The main issues were dependency installation and version compatibility rather than platform-specific workflow logic.
 - I kept the platform abstraction work out of the main code path for now, since the existing configuration and run model were sufficient for migration validation.
 - Future ARCHER2 support can focus on documentation, job script examples, and optional Snakemake profiles if repeated HPC execution becomes necessary.
+
+### 阶段九：最小 LLVM 版本监控与自动触发
+
+阶段九对应 optional task 中的自动版本监控需求。本阶段没有引入完整 CI/CD、通知系统、systemd timer 或 cron 管理框架，而是实现一条最小闭环：
+
+```text
+检查 LLVM 官方 release tag
+  -> 发现新的 stable tag
+  -> 用该 tag 覆盖本次运行的 LLVM 版本
+  -> 复用现有 Snakemake workflow
+```
+
+这一阶段的重点是证明系统可以被外部定时任务驱动，同时避免为了 optional task 引入过重的调度系统。
+
+#### 运行时 LLVM tag override
+
+`run.sh` 新增运行时 LLVM tag 覆盖参数：
+
+```bash
+./run.sh --llvm-tag llvmorg-22.0.0
+./run.sh -L llvmorg-22.0.0
+./run.sh dry-run --llvm-tag llvmorg-22.0.0
+./run.sh strict dry-run --llvm-tag llvmorg-22.0.0
+```
+
+传入 `--llvm-tag` 后，本次 Snakemake DAG 只使用命令行指定的 LLVM tag。`config.yml` 中原本配置的 `llvm.tags` 或 explicit experiment 里的 `llvm_tag` 会被忽略，但 Official test-suite tag、RAJA tag、samples、label、test_selection 等配置仍然来自 `config.yml`。
+
+实现上，`run.sh` 会把参数转换为 Snakemake config override：
+
+```bash
+--config llvm_tag_override=<tag>
+```
+
+然后 `workflow/Snakefile` 将该值传给 `normalize_workflow_config()`。配置归一化层负责在 simple mode 和 explicit mode 中统一替换 LLVM tag，并继续使用已有的重复实验校验逻辑。
+
+#### LLVM release 监控脚本
+
+新增脚本：
+
+```text
+tools/check_llvm_releases.py
+```
+
+脚本职责是：
+
+- 从 `config.yml` 读取 `repositories.llvm` 和 `project.base_dir`。
+- 使用 `git ls-remote --tags <llvm_repo_url>` 查询远程 tag。
+- 只接受 `llvmorg-X.Y.Z` 形式的 stable release tag。
+- 排除 annotated tag 的 `^{}` dereference。
+- 按数字版本语义排序，而不是按字符串排序。
+- 与本地状态文件比较，判断最新 release tag 是否已经处理过。
+- 只有显式传入 `--run` 时才调用 `./run.sh --llvm-tag <tag>`。
+
+默认状态目录是：
+
+```text
+auto/monitor/
+```
+
+主要状态文件是：
+
+```text
+auto/monitor/seen_llvm_tags.txt
+auto/monitor/last_triggered.json
+```
+
+这些文件属于运行状态，不进入 git。
+
+#### 监控脚本使用方式
+
+默认 dry-run，只检查远程 tag，不写状态，不启动 workflow：
+
+```bash
+.venv/bin/python tools/check_llvm_releases.py --config-file config.yml
+```
+
+首次部署时，可以将当前最新 LLVM release 记录为基线：
+
+```bash
+.venv/bin/python tools/check_llvm_releases.py --config-file config.yml --initialize
+```
+
+定时任务中使用 `--run`：
+
+```bash
+.venv/bin/python tools/check_llvm_releases.py --config-file config.yml --run
+```
+
+如果状态文件不存在，即使传入 `--run`，脚本也只会把当前 latest tag 初始化为基线，不会立刻启动历史版本实验。这样可以避免第一次部署监控任务时意外触发长时间 benchmark。
+
+之后如果 LLVM 官方仓库出现新的 latest stable tag，`--run` 会调用：
+
+```bash
+./run.sh --llvm-tag <new-tag>
+```
+
+只有 workflow 成功结束后，该 tag 才会写入 `seen_llvm_tags.txt`。如果 workflow 失败，tag 不会被标记为完成，下一次监控运行仍可重试。
+
+#### Cron 示例
+
+新增文档：
+
+```text
+docs/monitoring.md
+```
+
+其中记录了最小 cron 示例：
+
+```cron
+0 3 * * * cd /path/to/project && .venv/bin/python tools/check_llvm_releases.py --config-file config.yml --run >> auto/monitor/cron.log 2>&1
+```
+
+这个示例只展示关键调用方式。实际部署时仍需要根据目标机器调整项目路径、Python 环境、运行时间、日志路径和资源策略。本项目不负责自动安装或修改 crontab。
+
+#### 暂不支持的内容
+
+- 不监控 RAJA 或 Official test-suite 新版本。
+- 不按 commit 级别监控，只处理 LLVM stable release tag。
+- 不自动修改 `config.yml`。
+- 不自动清理旧结果。
+- 不发送邮件、Slack、Webhook 或其他通知。
+- 不提供 GitHub Actions / GitLab CI 集成。
+- 不封装完整 cron 管理框架。
+
+#### 验证与结果
+
+- 已执行 `bash -n run.sh`。
+- 已执行 `.venv/bin/python -m py_compile workflow/lib/common.py`。
+- 已执行 `.venv/bin/python -m py_compile tools/check_llvm_releases.py`。
+- 已验证 simple mode 下 `--llvm-tag` 会覆盖 `llvm.tags`。
+- 已验证 explicit mode 下 `--llvm-tag` 会覆盖每个 experiment 的 `llvm_tag`。
+- 已验证 `./run.sh dry-run --llvm-tag <tag>` 可以正常展开 DAG。
+- 已使用临时状态目录验证监控脚本 dry-run、`--initialize`、已有旧 tag 时发现新 latest tag 的分支。
+
+#### Commit Message
+
+Add minimal LLVM release monitoring.
+Support runtime LLVM tag override in the workflow wrapper, add a release-tag monitor that can be driven by cron, store monitor state under auto/monitor, and document the minimal deployment flow.
+
+#### Weekly Update
+
+- This week I implemented the optional LLVM release monitoring path.
+- I added runtime LLVM tag override support so a cron-triggered run can test one newly discovered LLVM tag without editing `config.yml`.
+- I added a small monitor script that reads the LLVM repository from the project config, checks stable release tags, and compares them with local monitor state.
+- I kept the monitor safe by default: dry-run does not write state, first `--run` initializes a baseline, and failed workflows do not mark a tag as processed.
+- I documented the intended cron usage while keeping cron installation and scheduling outside the project code.
