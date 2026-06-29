@@ -29,3 +29,35 @@ MultiSource/Applications/ClamAV/libclamav_cvd.c
 error: incompatible pointer types assigning to 'gzFile *' from 'gzFile'
 error: incompatible pointer types passing 'gzFile *' to parameter of type 'gzFile'
 ```
+
+## 2026-06-29: LLVM 11/12/13 Build Failed
+
+Failed LLVM versions:
+
+```text
+llvmorg-11.1.0
+llvmorg-12.0.1
+llvmorg-13.0.1
+```
+
+Failed rule:
+
+```text
+build_llvm
+```
+
+Failure logs:
+
+```text
+auto/logs/_shared/build_llvm/llvmorg-11.1.0/build_llvm.log
+auto/logs/_shared/build_llvm/llvmorg-12.0.1/build_llvm.log
+auto/logs/_shared/build_llvm/llvmorg-13.0.1/build_llvm.log
+```
+
+Core error:
+
+```text
+llvm/include/llvm/Support/Signals.h
+error: 'uintptr_t' was not declared in this scope
+note: 'uintptr_t' is defined in header '<cstdint>'
+```
