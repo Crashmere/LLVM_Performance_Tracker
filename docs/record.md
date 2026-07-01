@@ -61,3 +61,31 @@ llvm/include/llvm/Support/Signals.h
 error: 'uintptr_t' was not declared in this scope
 note: 'uintptr_t' is defined in header '<cstdint>'
 ```
+
+## 2026-07-01: LLVM 14.0.0 Build Failed
+
+Failed LLVM version:
+
+```text
+llvmorg-14.0.0
+```
+
+Failed rule:
+
+```text
+build_llvm
+```
+
+Failure log:
+
+```text
+auto/logs/_shared/build_llvm/llvmorg-14.0.0/build_llvm.log
+```
+
+Core error:
+
+```text
+llvm/include/llvm/Support/Signals.h
+error: 'uintptr_t' was not declared in this scope
+note: 'uintptr_t' is defined in header '<cstdint>'
+```
